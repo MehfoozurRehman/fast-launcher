@@ -44,6 +44,7 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
 
         KeyguardManager km = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
         if (km == null || !km.isKeyguardLocked()) addStrip();
+        ensurePanel();
     }
 
     // Nothing on the lock screen: the panel must never be reachable without unlocking.
@@ -120,6 +121,10 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
                 case MotionEvent.ACTION_DOWN:
                     downY = e.getRawY();
                     pulling = false;
+                    // read every control's state now, while the finger hasn't moved yet: this
+                    // frame draws nothing visible, so the panel's first visible frame is cheap
+                    ensurePanel();
+                    if (!panelOpen) panel.refresh();
                     return true;
                 case MotionEvent.ACTION_MOVE: {
                     float dy = e.getRawY() - downY;
@@ -150,13 +155,16 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
     private void ensurePanel() {
         if (panel != null) return;
         panel = new ControlPanel(this, this);
-        panelLp = new WindowManager.LayoutParams(1, 1,
+        // Full-size from the start but fully transparent and untouchable while hidden: the
+        // compositor skips a window with alpha 0, and a pull never has to resize or re-lay out.
+        panelLp = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 hiddenFlags(), PixelFormat.TRANSLUCENT);
         panelLp.gravity = Gravity.TOP | Gravity.START;
         panelLp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         panelLp.setTitle("FastLauncherPanel");
-        panel.setVisibility(View.INVISIBLE);
+        panelLp.alpha = 0f;
         wm.addView(panel, panelLp);
     }
 
@@ -171,23 +179,20 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
         ensurePanel();
         if (panelOpen) return;
         panelOpen = true;
-        panel.refresh();
-        panelLp.width = WindowManager.LayoutParams.MATCH_PARENT;
-        panelLp.height = WindowManager.LayoutParams.MATCH_PARENT;
-        panelLp.flags = hiddenFlags() & ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        panelLp.alpha = 1f;
+        // focusable while open, so Back (button or gesture) reaches the panel itself
+        panelLp.flags = hiddenFlags() & ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                & ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
         wm.updateViewLayout(panel, panelLp);
-        panel.setVisibility(View.VISIBLE);
     }
 
-    /** When hidden the window shrinks to one untouchable pixel: nothing to composite. */
+    /** Hidden = transparent and untouchable: nothing to composite, nothing to rebuild next time. */
     @Override public void finishHide() {
         if (panel == null) return;
         panelOpen = false;
         panel.setProgress(0f);
-        panel.setVisibility(View.INVISIBLE);
         panel.unbind();
-        panelLp.width = 1;
-        panelLp.height = 1;
+        panelLp.alpha = 0f;
         panelLp.flags = hiddenFlags();
         try { wm.updateViewLayout(panel, panelLp); } catch (Exception ignored) {}
     }

@@ -11,7 +11,9 @@ import android.view.View;
 final class PanelIcons extends View {
     static final int WIFI = 0, HOTSPOT = 1, ROTATE = 2, TORCH = 3, BLUETOOTH = 4, DND = 5, DATA = 6,
             LOCATION = 7, PLANE = 8, BATTERY = 9, SCREENSHOT = 10, LOCK = 11, GEAR = 12, SUN = 13,
-            SPEAKER = 14, PREV = 15, PLAY = 16, PAUSE = 17, NEXT = 18, ROTATE_LOCK = 19;
+            SPEAKER = 14, PREV = 15, PLAY = 16, PAUSE = 17, NEXT = 18, ROTATE_LOCK = 19,
+            BELL = 20, VIBRATE = 21, BELL_OFF = 22, DARK = 23, EYE = 24, CAST = 25, RECORD = 26,
+            CALC = 27, MIC = 28, POWER = 29;
 
     int type;
     private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -171,6 +173,64 @@ final class PanelIcons extends View {
             case PLAY:
                 path.moveTo(7.5f, 4.5f); path.lineTo(19.5f, 12); path.lineTo(7.5f, 19.5f); path.close();
                 c.drawPath(path, f);
+                break;
+            case BELL:
+            case BELL_OFF:
+                path.moveTo(6, 17); path.lineTo(6, 11); path.cubicTo(6, 7.5f, 8.7f, 4.5f, 12, 4.5f);
+                path.cubicTo(15.3f, 4.5f, 18, 7.5f, 18, 11); path.lineTo(18, 17); path.close();
+                c.drawPath(path, p);
+                c.drawLine(4.5f, 17, 19.5f, 17, p);
+                c.drawLine(10.5f, 20, 13.5f, 20, p);
+                c.drawLine(12, 2.5f, 12, 4.5f, p);
+                if (type == BELL_OFF) c.drawLine(4, 4, 20, 20, p);
+                break;
+            case VIBRATE:
+                r.set(8, 4, 16, 20); c.drawRoundRect(r, 1.8f, 1.8f, p);
+                c.drawLine(4.5f, 9, 4.5f, 15, p); c.drawLine(19.5f, 9, 19.5f, 15, p);
+                c.drawLine(2, 10.5f, 2, 13.5f, p); c.drawLine(22, 10.5f, 22, 13.5f, p);
+                break;
+            case DARK:
+                path.addCircle(12, 12, 8.5f, Path.Direction.CW);
+                c.drawPath(path, p);
+                path.reset();
+                path.moveTo(12, 3.5f);
+                r.set(3.5f, 3.5f, 20.5f, 20.5f);
+                path.arcTo(r, -90, 180);
+                path.close();
+                c.drawPath(path, f);
+                break;
+            case EYE:
+                path.moveTo(2.5f, 12); path.cubicTo(6, 5.5f, 18, 5.5f, 21.5f, 12);
+                path.cubicTo(18, 18.5f, 6, 18.5f, 2.5f, 12);
+                c.drawPath(path, p);
+                c.drawCircle(12, 12, 3, p);
+                break;
+            case CAST:
+                path.moveTo(3, 8); path.lineTo(3, 6); path.cubicTo(3, 5, 4, 4.5f, 5, 4.5f); path.lineTo(19, 4.5f);
+                path.cubicTo(20, 4.5f, 21, 5, 21, 6); path.lineTo(21, 18); path.cubicTo(21, 19, 20, 19.5f, 19, 19.5f);
+                path.lineTo(14, 19.5f);
+                c.drawPath(path, p);
+                r.set(-1, 11.5f, 11, 23.5f); c.drawArc(r, -90, 90, false, p);
+                r.set(-1, 15.5f, 7, 23.5f); c.drawArc(r, -90, 90, false, p);
+                c.drawCircle(3, 19.5f, 1.3f, f);
+                break;
+            case RECORD:
+                c.drawCircle(12, 12, 8.5f, p);
+                c.drawCircle(12, 12, 4, f);
+                break;
+            case CALC:
+                r.set(5, 3, 19, 21); c.drawRoundRect(r, 2.5f, 2.5f, p);
+                r.set(8, 6, 16, 9.5f); c.drawRoundRect(r, 1, 1, p);
+                for (int i = 0; i < 3; i++) for (int j = 0; j < 2; j++) c.drawCircle(9 + j * 6, 13 + i * 3, 0.9f, f);
+                break;
+            case MIC:
+                r.set(9, 3, 15, 14); c.drawRoundRect(r, 3, 3, p);
+                r.set(6, 7, 18, 17.5f); c.drawArc(r, 0, 180, false, p);
+                c.drawLine(12, 17.5f, 12, 21, p);
+                break;
+            case POWER:
+                r.set(4.5f, 5, 19.5f, 20); c.drawArc(r, -60, 300, false, p);
+                c.drawLine(12, 3, 12, 11.5f, p);
                 break;
             case PAUSE:
                 r.set(6.5f, 5, 10, 19); c.drawRoundRect(r, 1.2f, 1.2f, f);

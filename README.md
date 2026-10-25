@@ -19,6 +19,13 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   round Info / Hide / Uninstall buttons and Add to dock (tap the dashed slot you want). Hidden apps
   collect behind a pill at the bottom of the drawer.
 - **Swipe down on home** opens the notification shade.
+- **Control panel, from any app**: swipe down from the right half of the status bar (needs the
+  "Fast Launcher controls" accessibility service, which reads no screen content). Wi-Fi, Mobile data,
+  Bluetooth and Torch tiles; now playing; brightness and volume sliders that show the real level; and a
+  grid with Hotspot, Auto-rotate, Aeroplane, Location, Dark mode, Do not disturb, Sound mode, Eye
+  comfort, Battery saver, Screenshot, Screen record, Cast, Calculator, Recorder, Lock and Power.
+  Controls Android lets apps change are switched in place; the rest open their exact system page.
+  The pull strip is removed while the phone is locked.
 - **Type**: clock, date and headings use Montserrat (bundled, SIL Open Font License, see `assets/fonts/OFL.txt`).
 - **Long-press home**: wallpaper panel, the launcher's only settings.
   - Wallpapers come from [wallhaven.cc](https://wallhaven.cc) (SFW, portrait, at least 1080x1920).
