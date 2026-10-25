@@ -188,13 +188,25 @@ public class MainActivity extends Activity {
         date.setText(new java.text.SimpleDateFormat("EEE, d MMMM", Locale.getDefault()).format(c.getTime()));
     }
 
+    private final NotifService.Changed notifChanged = new NotifService.Changed() {
+        @Override public void onNotifCountsChanged() { pushBadges(); }
+    };
+
+    private void pushBadges() {
+        dock.setNotifCounts(NotifService.counts);
+        grid.setNotifCounts(NotifService.counts);
+    }
+
     @Override protected void onResume() {
         super.onResume();
+        NotifService.listener = notifChanged;
+        pushBadges();
         clock.removeCallbacks(tick);
         tick.run();
     }
 
     @Override protected void onPause() {
+        if (NotifService.listener == notifChanged) NotifService.listener = null;
         clock.removeCallbacks(tick);
         super.onPause();
     }
@@ -202,7 +214,7 @@ public class MainActivity extends Activity {
     private void buildDrawer() {
         drawer = new FrameLayout(this);
         drawer.setBackgroundColor(0x55000000);
-        drawer.setVisibility(View.GONE);
+        drawer.setVisibility(View.INVISIBLE);
         root.addView(drawer, new FrameLayout.LayoutParams(-1, -1));
 
         title = new TextView(this);
@@ -244,7 +256,7 @@ public class MainActivity extends Activity {
             @Override public void onClick(View v) { headerMenu(); }
         });
 
-        grid = new AppGridView(this, 5, 17, 97, 44, 8, 120, true, true);
+        grid = new AppGridView(this, 5, 17, 97, 44, 8, 12, true, true);
         grid.setListener(new AppGridView.Listener() {
             @Override public void onTap(AppGridView.AppEntry e) { launch(e); }
             @Override public void onLongPress(AppGridView.AppEntry e) { appMenu(e); }
@@ -287,6 +299,7 @@ public class MainActivity extends Activity {
         FrameLayout.LayoutParams gp = (FrameLayout.LayoutParams) grid.getLayoutParams();
         gp.topMargin = insetTop + dpi(78);
         grid.setLayoutParams(gp);
+        grid.setBottomInset(insetBottom);
         root.requestLayout();
     }
 
@@ -366,6 +379,10 @@ public class MainActivity extends Activity {
             int in = Math.round(s * 0.17f);
             d.setBounds(in, in, s - in, s - in);
             d.draw(c);
+        }
+        if (Build.VERSION.SDK_INT >= 26) {
+            Bitmap hw = bmp.copy(Bitmap.Config.HARDWARE, false);
+            if (hw != null) { bmp.recycle(); return hw; }
         }
         return bmp;
     }
@@ -540,42 +557,80 @@ public class MainActivity extends Activity {
     final class Root extends FrameLayout {
         private float progress; // 0 closed .. 1 open
         private float downX, downY, startProgress;
-        private boolean dragging;
+        private boolean dragging, layered;
         private VelocityTracker vt;
         private ValueAnimator anim;
         private final int slop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
+        private final android.view.animation.Interpolator settle =
+                new android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f);
 
         Root(Context c) { super(c); }
 
         private float travel() { return Math.max(1, getHeight()); }
 
+        // Both halves become GPU layers while they move, so a frame is two quads, not a redraw.
+        private void beginLayers() {
+            if (layered) return;
+            layered = true;
+            drawer.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            home.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        }
+
+        private void endLayers() {
+            if (!layered || dragging || (anim != null && anim.isRunning())) return;
+            layered = false;
+            drawer.setLayerType(View.LAYER_TYPE_NONE, null);
+            home.setLayerType(View.LAYER_TYPE_NONE, null);
+        }
+
         void setProgress(float p) {
             progress = Math.max(0f, Math.min(1f, p));
             if (progress <= 0f) {
-                drawer.setVisibility(View.GONE);
+                drawer.setVisibility(View.INVISIBLE);
                 home.setAlpha(1f);
-                home.setTranslationY(0);
+                home.setScaleX(1f);
+                home.setScaleY(1f);
                 drawerOpen = false;
                 return;
             }
             if (drawer.getVisibility() != View.VISIBLE) drawer.setVisibility(View.VISIBLE);
-            drawer.setTranslationY((1f - progress) * travel() * 0.35f);
-            drawer.setAlpha(progress);
-            home.setAlpha(1f - Math.min(1f, progress * 1.6f));
-            home.setTranslationY(-progress * dpi(40));
+            drawer.setTranslationY((1f - progress) * travel());
+            home.setAlpha(1f - Math.min(1f, progress * 1.5f));
+            float sc = 1f - 0.07f * progress;
+            home.setScaleX(sc);
+            home.setScaleY(sc);
             drawerOpen = progress >= 1f;
         }
 
-        void snapTo(float p) { if (anim != null) anim.cancel(); setProgress(p); }
+        void snapTo(float p) {
+            if (anim != null) anim.cancel();
+            setProgress(p);
+            endLayers();
+        }
 
-        void animateTo(final float target) {
+        void animateTo(float target) { animateTo(target, 0f); }
+
+        void animateTo(final float target, float velocity) {
             if (anim != null) anim.cancel();
             if (target == 0f && searching) endSearch();
+            float dist = Math.abs(target - progress);
+            if (dist < 0.002f) { setProgress(target); endLayers(); return; }
+            long dur = Math.round(170 + 190 * dist);
+            if (velocity > 300f) {
+                long byVel = Math.round(dist * travel() / velocity * 1000f * 1.35f);
+                dur = Math.max(170, Math.min(dur, byVel));
+            }
+            beginLayers();
             anim = ValueAnimator.ofFloat(progress, target);
-            anim.setDuration(Math.round(240 * Math.abs(target - progress) + 60));
-            anim.setInterpolator(new DecelerateInterpolator(1.6f));
+            anim.setDuration(dur);
+            anim.setInterpolator(settle);
             anim.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
                 @Override public void onAnimationUpdate(ValueAnimator a) { setProgress((Float) a.getAnimatedValue()); }
+            });
+            anim.addListener(new AnimatorListenerAdapter() {
+                @Override public void onAnimationEnd(Animator a) {
+                    post(new Runnable() { @Override public void run() { endLayers(); } });
+                }
             });
             anim.start();
         }
@@ -608,6 +663,7 @@ public class MainActivity extends Activity {
                     dragging = true;
                     downY = ev.getY();
                     startProgress = progress;
+                    beginLayers();
                     return true;
                 }
             }
@@ -624,7 +680,7 @@ public class MainActivity extends Activity {
                     return true;
                 case MotionEvent.ACTION_MOVE:
                     if (!dragging) maybeStartDrag(ev);
-                    if (dragging) setProgress(startProgress + (downY - ev.getY()) / (travel() * 0.45f));
+                    if (dragging) setProgress(startProgress + (downY - ev.getY()) / travel());
                     return true;
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
@@ -632,10 +688,12 @@ public class MainActivity extends Activity {
                         vt.computeCurrentVelocity(1000);
                         float vy = vt.getYVelocity();
                         float target;
-                        if (vy < -900) target = 1f;
-                        else if (vy > 900) target = 0f;
+                        if (vy < -700) target = 1f;
+                        else if (vy > 700) target = 0f;
                         else target = progress > 0.5f ? 1f : 0f;
-                        animateTo(target);
+                        dragging = false;
+                        float toward = (target == 1f) ? -vy : vy;
+                        animateTo(target, toward);
                     }
                     dragging = false;
                     vt.recycle(); vt = null;

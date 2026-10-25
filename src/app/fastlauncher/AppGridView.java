@@ -40,10 +40,14 @@ final class AppGridView extends View {
 
     private final int cols;
     private final boolean scrollable, labels;
-    private final float padX, rowH, iconSize, topPad, bottomPad, labelGap;
+    private final float padX, rowH, iconSize, topPad, labelGap;
+    private float bottomPad;
 
     private final Paint iconPaint = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint badgePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint badgeText = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final float badgeR;
 
     private final OverScroller scroller;
     private VelocityTracker vt;
@@ -86,10 +90,18 @@ final class AppGridView extends View {
         textPaint.setTextSize(11 * c.getResources().getDisplayMetrics().scaledDensity);
         textPaint.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         textPaint.setShadowLayer(3 * d, 0, d, 0x66000000);
+        badgeR = 9 * d;
+        badgePaint.setColor(0xFFF03E3E);
+        badgeText.setColor(Color.WHITE);
+        badgeText.setTextAlign(Paint.Align.CENTER);
+        badgeText.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        badgeText.setTextSize(11 * d);
         setLayerType(LAYER_TYPE_NONE, null);
     }
 
     void setListener(Listener l) { listener = l; }
+
+    void setBottomInset(int px) { bottomPad = px + 12 * getResources().getDisplayMetrics().density; invalidate(); }
 
     void setItems(List<AppEntry> list) {
         items = list;
@@ -149,11 +161,27 @@ final class AppGridView extends View {
                 if (b != null) {
                     canvas.drawBitmap(b, cx - b.getWidth() / 2f, top, iconPaint);
                 }
+                Integer cnt = notifs.get(e.cn.getPackageName());
+                if (cnt != null && b != null) drawBadge(canvas, cx + iconSize / 2f - badgeR * 0.35f, top + badgeR * 0.35f, cnt);
                 if (labels && e.drawLabel != null) {
                     canvas.drawText(e.drawLabel, cx, top + iconSize + labelGap + textPaint.getTextSize(), textPaint);
                 }
             }
         }
+    }
+
+    private java.util.Map<String, Integer> notifs = java.util.Collections.emptyMap();
+
+    void setNotifCounts(java.util.Map<String, Integer> m) {
+        notifs = m;
+        invalidate();
+    }
+
+    private void drawBadge(Canvas c, float x, float y, int n) {
+        String t = n > 99 ? "99+" : String.valueOf(n);
+        float w = Math.max(badgeR * 2, badgeText.measureText(t) + badgeR * 0.8f);
+        c.drawRoundRect(x - w / 2, y - badgeR, x + w / 2, y + badgeR, badgeR, badgeR, badgePaint);
+        c.drawText(t, x, y + badgeText.getTextSize() * 0.35f, badgeText);
     }
 
     private AppEntry hit(float x, float y) {
