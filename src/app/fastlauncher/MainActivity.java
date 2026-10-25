@@ -68,6 +68,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private float dp;
     private int iconPx;
     private int insetTop, insetBottom;
+    private boolean insetsApplied;
 
     private Root root;
     private FrameLayout home, drawer;
@@ -115,12 +116,23 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         buildHome();
         buildDrawer();
         root.setOnApplyWindowInsetsListener((v, in) -> {
-            insetTop = in.getSystemWindowInsetTop();
-            insetBottom = in.getSystemWindowInsetBottom();
-            applyInsets();
+            int top, bottom;
+            if (Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets bars = in.getInsets(WindowInsets.Type.systemBars());
+                top = bars.top;
+                bottom = bars.bottom;
+            } else {
+                top = in.getSystemWindowInsetTop();
+                bottom = Math.min(in.getSystemWindowInsetBottom(), in.getStableInsetBottom());
+            }
+            if (top != insetTop || bottom != insetBottom || !insetsApplied) {
+                insetTop = top;
+                insetBottom = bottom;
+                insetsApplied = true;
+                applyInsets();
+            }
             return in;
         });
-
         IntentFilter f = new IntentFilter();
         f.addAction(Intent.ACTION_PACKAGE_ADDED);
         f.addAction(Intent.ACTION_PACKAGE_REMOVED);
@@ -134,14 +146,29 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             refreshDrawerList();
             dock.setItems(dockShown);
         }
+        IntentFilter dbg = new IntentFilter("app.fastlauncher.DEBUG");
+        // only adb (which holds DUMP) may send these; other apps can't touch the wallpaper
+        if (Build.VERSION.SDK_INT >= 33)
+            registerReceiver(debugReceiver, dbg, android.Manifest.permission.DUMP, null, Context.RECEIVER_EXPORTED);
+        else registerReceiver(debugReceiver, dbg, android.Manifest.permission.DUMP, null);
         watchWallpaperColors();
-        Walls.init(this);
+        final Context appCtx = getApplicationContext();
+        wallWorker.execute(() -> Walls.init(appCtx));
         loadBlur();
         loadApps(null);
     }
 
+    /** adb shell am broadcast -a app.fastlauncher.DEBUG -p app.fastlauncher --es debug swap|restore|history|apply:ID */
+    private final BroadcastReceiver debugReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context c, Intent i) {
+            String what = i.getStringExtra("debug");
+            if (what != null) debugWallpaper(what);
+        }
+    };
+
     @Override protected void onDestroy() {
         unregisterReceiver(pkgReceiver);
+        unregisterReceiver(debugReceiver);
         if (Build.VERSION.SDK_INT >= 27 && colorsListener != null) {
             try {
                 WallpaperManager.getInstance(this).removeOnColorsChangedListener(
@@ -161,8 +188,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
     @Override protected void onNewIntent(Intent i) {
         super.onNewIntent(i);
-        String debug = i.getStringExtra("debug");
-        if (debug != null) { debugWallpaper(debug); return; }
         if (!Intent.ACTION_MAIN.equals(i.getAction())) return;
         // Home pressed: unwind everything back to the plain home screen.
         closeAllOverlays();
@@ -218,6 +243,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         showWeather();
         updateHeader();
         tick.run();
+        if (sheet == null) main.postDelayed(() -> { if (!isDestroyed()) sheet(); }, 1500);
         Walls.cover = cover;
         // Backstop for the scheduled job, which OEM battery managers like to delay.
         if (Walls.due(this) && !Walls.isBusy()) {
@@ -327,6 +353,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 if (placing != null) return;
                 dockMenu(e, index, cx, cy);
             }
+            @Override public void onPressStart(AppGridView.AppEntry e) { prefetchShortcuts(e); }
         });
         home.addView(dock, new FrameLayout.LayoutParams(-1, dpi(DOCK_HEIGHT_DP), Gravity.BOTTOM));
     }
@@ -363,6 +390,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 appMenu(e, cx, cy);
             }
             @Override public void onFooterTap(float cx, float cy) { hiddenMenu(cx, cy); }
+            @Override public void onPressStart(AppGridView.AppEntry e) { prefetchShortcuts(e); }
         });
         drawer.addView(grid, new FrameLayout.LayoutParams(-1, -1, Gravity.TOP));
 
@@ -374,27 +402,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         title.setIncludeFontPadding(false);
         title.setShadowLayer(dpi(3), 0, dpi(1), 0x55000000);
         drawer.addView(title, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START));
-
-        search = new EditText(this);
-        search.setHint("Search apps");
-        search.setHintTextColor(0x99FFFFFF);
-        search.setTextColor(Color.WHITE);
-        search.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
-        search.setSingleLine(true);
-        search.setImeOptions(EditorInfo.IME_ACTION_GO);
-        search.setBackground(Ui.round(0x26FFFFFF, dpi(24)));
-        search.setPadding(dpi(20), 0, dpi(20), 0);
-        search.setVisibility(View.GONE);
-        search.addTextChangedListener(new TextWatcher() {
-            public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
-            public void onTextChanged(CharSequence s, int a, int b, int c) { filter(s.toString()); }
-            public void afterTextChanged(Editable s) {}
-        });
-        search.setOnEditorActionListener((v, action, ev) -> {
-            if (!shown.isEmpty()) launch(shown.get(0), grid, 0);
-            return true;
-        });
-        drawer.addView(search, new FrameLayout.LayoutParams(-1, dpi(48), Gravity.TOP));
 
         btnSearch = new Ui.Glyph(this, Ui.G_SEARCH, Color.WHITE);
         btnSearch.setPadding(dpi(10), dpi(10), dpi(10), dpi(10));
@@ -421,11 +428,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         tp.topMargin = headerTop + dpi(8);
         tp.leftMargin = dpi(23);
         title.setLayoutParams(tp);
-        FrameLayout.LayoutParams sp = (FrameLayout.LayoutParams) search.getLayoutParams();
-        sp.topMargin = headerTop;
-        sp.leftMargin = dpi(16);
-        sp.rightMargin = dpi(16);
-        search.setLayoutParams(sp);
+        if (search != null) placeSearch();
         FrameLayout.LayoutParams bp = (FrameLayout.LayoutParams) btnSearch.getLayoutParams();
         bp.topMargin = headerTop;
         bp.rightMargin = dpi(14);
@@ -580,7 +583,12 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     /** With a blur behind it the drawer needs only a light tint; without, a stronger scrim. */
     private void updateDrawerScrim() {
         boolean blur = blurView.hasBlur();
-        drawer.setBackgroundColor(blur ? (brightWall ? 0x40000000 : 0x1A000000) : (brightWall ? 0x8C000000 : 0x59000000));
+        if (blur) {
+            drawer.setBackground(null);
+            blurView.setDim(brightWall ? 0.62f : 0.82f);
+        } else {
+            drawer.setBackgroundColor(brightWall ? 0x8C000000 : 0x59000000);
+        }
     }
 
     private void loadBlur() {
@@ -655,7 +663,29 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             grid.postInvalidate();
             dock.postInvalidate();
             if (gen == loadGen) Icons.prune(this, used);
+            main.post(this::warmDrawer);
         });
+    }
+
+    private boolean drawerWarmed;
+
+    /**
+     * Draw the drawer once, practically invisible, so the first real swipe-up doesn't pay for
+     * rasterising every label and uploading the blur on its first frame.
+     */
+    private void warmDrawer() {
+        if (drawerWarmed || isDestroyed() || root.progress != 0f || !overlays.isEmpty()) return;
+        drawerWarmed = true;
+        drawer.setTranslationY(0);
+        drawer.setAlpha(0.004f);
+        drawer.setVisibility(View.VISIBLE);
+        if (blurView.hasBlur()) { blurView.setAlpha(0.004f); blurView.setVisibility(View.VISIBLE); }
+        root.postOnAnimation(() -> root.postOnAnimation(() -> {
+            if (root.progress == 0f) {
+                drawer.setVisibility(View.INVISIBLE);
+                blurView.setVisibility(View.INVISIBLE);
+            }
+        }));
     }
 
     private boolean inDefaultDock(AppGridView.AppEntry e) {
@@ -770,8 +800,31 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         new Popup(this, e.label, e.icon, btns, shortcutItems(e), primary, loc[0] + cx, loc[1] + cy, dock.iconSizePx()).open();
     }
 
-    /** The app's own shortcuts (chats, new tab, ...). Only a default launcher may read them. */
+    private static final ExecutorService shortcutWorker = Executors.newSingleThreadExecutor();
+    private final java.util.concurrent.ConcurrentHashMap<ComponentName, Object[]> shortcutCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Called on finger-down over an icon: by the time a long-press fires, shortcuts are ready. */
+    private void prefetchShortcuts(final AppGridView.AppEntry e) {
+        if (e == null || e.blank || e.cn == null) return;
+        Object[] hit = shortcutCache.get(e.cn);
+        if (hit != null && android.os.SystemClock.uptimeMillis() - (Long) hit[0] < 60_000) return;
+        shortcutWorker.execute(() -> shortcutCache.put(e.cn,
+                new Object[]{android.os.SystemClock.uptimeMillis(), loadShortcuts(e)}));
+    }
+
+    @SuppressWarnings("unchecked")
     private List<Popup.Item> shortcutItems(AppGridView.AppEntry e) {
+        Object[] hit = shortcutCache.get(e.cn);
+        if (hit != null && android.os.SystemClock.uptimeMillis() - (Long) hit[0] < 60_000)
+            return new ArrayList<>((List<Popup.Item>) hit[1]);
+        List<Popup.Item> fresh = loadShortcuts(e);
+        shortcutCache.put(e.cn, new Object[]{android.os.SystemClock.uptimeMillis(), fresh});
+        return new ArrayList<>(fresh);
+    }
+
+    /** The app's own shortcuts (chats, new tab, ...). Only a default launcher may read them. */
+    private List<Popup.Item> loadShortcuts(AppGridView.AppEntry e) {
         List<Popup.Item> out = new ArrayList<>();
         try {
             final android.content.pm.LauncherApps la = getSystemService(android.content.pm.LauncherApps.class);
@@ -916,7 +969,42 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
     // ================================================================ search
 
+    /** EditText is one of the heaviest stock views; it's only created when search is used. */
+    private void ensureSearch() {
+        if (search != null) return;
+        search = new EditText(this);
+        search.setHint("Search apps");
+        search.setHintTextColor(0x99FFFFFF);
+        search.setTextColor(Color.WHITE);
+        search.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
+        search.setSingleLine(true);
+        search.setImeOptions(EditorInfo.IME_ACTION_GO);
+        search.setBackground(Ui.round(0x26FFFFFF, dpi(24)));
+        search.setPadding(dpi(20), 0, dpi(20), 0);
+        search.setVisibility(View.GONE);
+        search.addTextChangedListener(new TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            public void onTextChanged(CharSequence s, int a, int b, int c) { filter(s.toString()); }
+            public void afterTextChanged(Editable s) {}
+        });
+        search.setOnEditorActionListener((v, action, ev) -> {
+            if (!shown.isEmpty()) launch(shown.get(0), grid, 0);
+            return true;
+        });
+        drawer.addView(search, new FrameLayout.LayoutParams(-1, dpi(48), Gravity.TOP));
+        placeSearch();
+    }
+
+    private void placeSearch() {
+        FrameLayout.LayoutParams sp = (FrameLayout.LayoutParams) search.getLayoutParams();
+        sp.topMargin = insetTop + dpi(14);
+        sp.leftMargin = dpi(16);
+        sp.rightMargin = dpi(16);
+        search.setLayoutParams(sp);
+    }
+
     private void beginSearch() {
+        ensureSearch();
         searching = true;
         title.animate().alpha(0f).setDuration(120).withEndAction(() -> title.setVisibility(View.INVISIBLE)).start();
         btnSearch.setVisibility(View.GONE);
@@ -930,8 +1018,10 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
     private void endSearch() {
         searching = false;
-        ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(search.getWindowToken(), 0);
-        search.setVisibility(View.GONE);
+        if (search != null) {
+            ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(search.getWindowToken(), 0);
+            search.setVisibility(View.GONE);
+        }
         title.setVisibility(View.VISIBLE);
         title.setAlpha(1f);
         btnSearch.setVisibility(View.VISIBLE);
@@ -965,7 +1055,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             snackView.setBackground(Ui.round(0xF0202226, dpi(22)));
             snackView.setPadding(dpi(18), dpi(13), dpi(18), dpi(13));
             snackView.setGravity(Gravity.CENTER);
-            snackView.setElevation(dpi(6));
         }
         if (snackView.getParent() == null) {
             FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
@@ -1016,10 +1105,20 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         for (int i = overlays.size() - 1; i >= 0; i--) overlays.get(i).close();
     }
 
+    private WallpaperUi.Sheet sheet;
+
+    private WallpaperUi.Sheet sheet() {
+        if (sheet == null) {
+            sheet = new WallpaperUi.Sheet(this);
+            sheet.prepare();
+        }
+        return sheet;
+    }
+
     private void openWallpaper() {
         if (!overlays.isEmpty()) return;
         cancelPlacing();
-        new WallpaperUi.Sheet(this).open();
+        sheet().open();
     }
 
     // ================================================================ popup menu
@@ -1061,11 +1160,15 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             dim.setOnClickListener(v -> close());
             addView(dim, new FrameLayout.LayoutParams(-1, -1));
 
-            card = new LinearLayout(c);
+            card = new LinearLayout(c) {
+                @Override public boolean hasOverlappingRendering() { return false; }
+            };
             card.setOrientation(LinearLayout.VERTICAL);
             card.setBackground(Ui.round(0xFF1B1D21, Ui.dp(c, 28)));
             card.setPadding(0, Ui.dpi(c, 6), 0, Ui.dpi(c, 10));
-            card.setElevation(Ui.dp(c, 14));
+            android.graphics.drawable.GradientDrawable cardBg = Ui.round(0xFF1B1D21, Ui.dp(c, 28));
+            cardBg.setStroke(Math.max(1, Ui.dpi(c, 1)), 0x14FFFFFF);
+            card.setBackground(cardBg);
             card.setClipToOutline(true);
 
             // header: icon + name + round buttons
@@ -1186,8 +1289,10 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         }
 
         @Override void animateOut(Runnable done) {
-            card.animate().alpha(0f).scaleX(0.92f).scaleY(0.92f).setDuration(130).setInterpolator(Ui.STANDARD).start();
-            dim.animate().alpha(0f).setDuration(130).withEndAction(done).start();
+            // Closing comes after an idle moment, when the GPU has clocked down; fading the card
+            // then cost ~20 ms frames. Dropping it instantly feels snappier and stays in budget.
+            card.setVisibility(INVISIBLE);
+            dim.animate().alpha(0f).setDuration(120).withEndAction(done).start();
         }
     }
 
@@ -1207,6 +1312,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         };
 
         Root(Context c) { super(c); }
+
 
         private float travel() { return Math.max(1, getHeight()); }
 
@@ -1234,6 +1340,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 drawer.setVisibility(View.INVISIBLE);
                 blurView.setVisibility(View.INVISIBLE);
                 home.setAlpha(1f);
+                if (home.getVisibility() != View.VISIBLE) home.setVisibility(View.VISIBLE);
                 home.setScaleX(1f);
                 home.setScaleY(1f);
                 return;
@@ -1248,7 +1355,10 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             drawer.setTranslationY(e * travel() * 0.33f);
             drawer.setAlpha(Math.min(1f, progress * 2.2f));
             blurView.setAlpha(Math.min(1f, progress * 1.6f));
-            home.setAlpha(1f - Math.min(1f, progress * 1.7f));
+            float ha = 1f - Math.min(1f, progress * 1.7f);
+            home.setAlpha(ha);
+            int hv = ha <= 0f ? View.INVISIBLE : View.VISIBLE;
+            if (home.getVisibility() != hv) home.setVisibility(hv);
             float sc = 1f - 0.08f * progress;
             home.setScaleX(sc);
             home.setScaleY(sc);
@@ -1401,6 +1511,13 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         boolean hasBlur() { return bmp != null; }
 
         void setBitmap(android.graphics.Bitmap b) { bmp = b; invalidate(); }
+
+        /** Darkens in the same draw call (a colour filter), so no extra full-screen pass. */
+        void setDim(float f) {
+            int v = Math.round(255 * f);
+            paint.setColorFilter(f >= 1f ? null : new android.graphics.LightingColorFilter(Color.rgb(v, v, v), 0));
+            invalidate();
+        }
 
         @Override protected void onDraw(android.graphics.Canvas c) {
             if (bmp == null) return;

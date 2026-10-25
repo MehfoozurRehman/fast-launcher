@@ -56,6 +56,8 @@ final class WallpaperUi {
     abstract static class Overlay extends FrameLayout {
         final Host host;
         boolean closing;
+        /** Kept attached (hidden) between uses, so reopening skips building and measuring. */
+        boolean reusable;
 
         Overlay(Host h) {
             super(h.context());
@@ -64,16 +66,45 @@ final class WallpaperUi {
         }
 
         void open() {
-            host.overlayParent().addView(this, new FrameLayout.LayoutParams(-1, -1));
+            closing = false;
+            if (getParent() == null) host.overlayParent().addView(this, new FrameLayout.LayoutParams(-1, -1));
+            else bringToFront();
+            setVisibility(VISIBLE);
+            setAlpha(1f);
+            shown = true;
+            onOpen();
             host.overlayOpened(this);
             animateIn();
         }
+
+        /** Attach hidden but measured, ready for an instant first open. */
+        void prepare() {
+            reusable = true;
+            if (getParent() == null) {
+                setAlpha(0.004f);
+                setClickable(false);
+                host.overlayParent().addView(this, 0, new FrameLayout.LayoutParams(-1, -1));
+                postOnAnimation(() -> postOnAnimation(() -> {
+                    if (host.overlayParent().indexOfChild(this) >= 0 && !isShownAsOverlay()) setVisibility(INVISIBLE);
+                    setAlpha(1f);
+                    setClickable(true);
+                }));
+            }
+        }
+
+        private boolean shown;
+
+        boolean isShownAsOverlay() { return shown; }
+
+        void onOpen() {}
 
         void close() {
             if (closing) return;
             closing = true;
             animateOut(() -> {
-                host.overlayParent().removeView(this);
+                shown = false;
+                if (reusable) setVisibility(INVISIBLE);
+                else host.overlayParent().removeView(this);
                 host.overlayClosed(this);
                 onClosed();
             });
@@ -284,13 +315,18 @@ final class WallpaperUi {
         }
 
         @Override void animateOut(Runnable done) {
+            // GPU-bound after idle: blit one texture instead of redrawing ~40 chips per frame
             card.setLayerType(LAYER_TYPE_HARDWARE, null);
             card.animate().translationY(card.getHeight() + Ui.dp(getContext(), 40)).setDuration(190)
                     .setInterpolator(Ui.STANDARD).withEndAction(done).start();
             backdrop.animate().alpha(0f).setDuration(220).start();
         }
 
-        @Override void onClosed() { if (nowThumbs != null) nowThumbs.close(); }
+        @Override void onOpen() {
+            refreshNow();
+            refreshNext();
+            backdrop.setAlpha(0f);
+        }
 
         // drag the card down to dismiss
         @Override public boolean onInterceptTouchEvent(MotionEvent e) {

@@ -43,6 +43,7 @@ final class AppGridView extends View {
         void onTap(AppEntry e, int index);
         void onLongPress(AppEntry e, int index, float cx, float cy);
         default void onFooterTap(float cx, float cy) {}
+        default void onPressStart(AppEntry e) {}
     }
 
     private List<AppEntry> items = new ArrayList<>();
@@ -68,8 +69,8 @@ final class AppGridView extends View {
     private final Paint footerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint footerText = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-    private final OverScroller scroller;
-    private final EdgeEffect bottomEdge;
+    private final OverScroller scroller;  // null when the grid doesn't scroll
+    private final EdgeEffect bottomEdge;  // null when the grid doesn't scroll
     private VelocityTracker vt;
     private final int slop, minFling, maxFling;
     private float off;
@@ -101,9 +102,14 @@ final class AppGridView extends View {
         this.scrollable = scrollable;
         this.labels = labels;
         this.labelGap = 7 * d;
-        scroller = new OverScroller(c);
-        scroller.setFriction(ViewConfiguration.getScrollFriction() * 0.7f); // longer, freer flings
-        bottomEdge = new EdgeEffect(c);
+        if (scrollable) {
+            scroller = new OverScroller(c);
+            scroller.setFriction(ViewConfiguration.getScrollFriction() * 0.7f); // longer, freer flings
+            bottomEdge = new EdgeEffect(c);
+        } else {
+            scroller = null;
+            bottomEdge = null;
+        }
         ViewConfiguration vc = ViewConfiguration.get(c);
         slop = vc.getScaledTouchSlop();
         minFling = vc.getScaledMinimumFlingVelocity();
@@ -112,7 +118,6 @@ final class AppGridView extends View {
         textPaint.setTextAlign(Paint.Align.CENTER);
         textPaint.setTextSize(11 * c.getResources().getDisplayMetrics().scaledDensity);
         textPaint.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        textPaint.setShadowLayer(3 * d, 0, d, 0x73000000);
         badgeR = 9.5f * d;
         badgePaint.setColor(0xFFFF3B30);
         badgeRing.setColor(Color.WHITE);
@@ -153,7 +158,7 @@ final class AppGridView extends View {
     void setItems(List<AppEntry> list) {
         items = list;
         off = 0;
-        scroller.forceFinished(true);
+        if (scroller != null) scroller.forceFinished(true);
         if (labels) {
             float maxW = (getWidth() > 0 ? (getWidth() - 2 * padX) / cols : 200) - 6;
             for (AppEntry e : items) if (e.drawLabel == null) e.drawLabel = fit(e.label, maxW);
@@ -212,7 +217,7 @@ final class AppGridView extends View {
     }
 
     @Override public void computeScroll() {
-        if (scroller.computeScrollOffset()) {
+        if (scroller != null && scroller.computeScrollOffset()) {
             off = scroller.getCurrY();
             if (off >= maxOff() && maxOff() > 0 && bottomEdge.isFinished()) {
                 bottomEdge.onAbsorb((int) scroller.getCurrVelocity());
@@ -278,7 +283,7 @@ final class AppGridView extends View {
             }
         }
         if (slots && slotAlpha < 1f) postInvalidateOnAnimation();
-        if (!bottomEdge.isFinished()) {
+        if (bottomEdge != null && !bottomEdge.isFinished()) {
             int save = canvas.save();
             canvas.rotate(180, getWidth() / 2f, getHeight() / 2f);
             bottomEdge.setSize(getWidth(), getHeight());
@@ -310,12 +315,14 @@ final class AppGridView extends View {
         vt.addMovement(ev);
         switch (ev.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                scroller.forceFinished(true);
+                if (scroller != null) scroller.forceFinished(true);
                 downX = ev.getX(); downY = lastY = ev.getY();
                 dragging = false; longFired = false;
                 pressedIndex = hit(downX, downY);
-                if (pressedIndex >= 0 && !items.get(pressedIndex).blank)
+                if (pressedIndex >= 0 && !items.get(pressedIndex).blank) {
                     handler.postDelayed(longPress, ViewConfiguration.getLongPressTimeout());
+                    if (listener != null) listener.onPressStart(items.get(pressedIndex));
+                }
                 return true;
             case MotionEvent.ACTION_MOVE: {
                 float y = ev.getY();
@@ -354,13 +361,13 @@ final class AppGridView extends View {
                     float y = footerTop() - off;
                     if (ev.getY() >= y && ev.getY() <= y + footerH()) listener.onFooterTap(getWidth() / 2f, y + footerH() / 2);
                 }
-                bottomEdge.onRelease();
+                if (bottomEdge != null) bottomEdge.onRelease();
                 postInvalidateOnAnimation();
                 recycle();
                 return true;
             case MotionEvent.ACTION_CANCEL:
                 handler.removeCallbacks(longPress);
-                bottomEdge.onRelease();
+                if (bottomEdge != null) bottomEdge.onRelease();
                 recycle();
                 return true;
         }
