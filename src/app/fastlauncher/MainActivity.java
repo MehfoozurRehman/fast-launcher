@@ -98,6 +98,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private final Handler main = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
     private boolean drawerOpen, searching, brightWall;
+    private float topLuma = -1f;
     private int wallColor = 0xFF2A2C31;
     private int loadGen;
     private AppGridView.AppEntry placing;
@@ -310,7 +311,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         // Only visible on bright wallpapers, to keep the white clock legible.
         topScrim = new View(this);
         topScrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0x55000000, 0x22000000, 0x00000000}));
+                new int[]{0x99000000, 0x66000000, 0x00000000}));
         topScrim.setAlpha(0f);
         home.addView(topScrim, new FrameLayout.LayoutParams(-1, dpi(340), Gravity.TOP));
 
@@ -463,12 +464,13 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             bright = Color.luminance(wallColor) > 0.55f;
         }
         brightWall = bright;
+        topLuma = -1f; // until the new blur has been analysed
         if (coverPending) {
             // the system has the new wallpaper; give it a beat to draw, then drop our copy
             main.removeCallbacks(fadeCover);
             main.postDelayed(fadeCover, 450);
         }
-        topScrim.animate().alpha(bright ? 1f : 0f).setDuration(400).start();
+        updateTopScrim();
         updateDrawerScrim();
         updateBars();
         loadBlur();
@@ -581,11 +583,20 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     }
 
     /** With a blur behind it the drawer needs only a light tint; without, a stronger scrim. */
+    /** Shade behind the clock in proportion to how bright the top of the wallpaper is. */
+    private void updateTopScrim() {
+        float a;
+        if (topLuma >= 0f) a = Math.max(0f, Math.min(1f, (topLuma - 0.08f) / 0.25f));
+        else a = brightWall ? 1f : 0f;
+        topScrim.animate().alpha(a).setDuration(400).start();
+    }
+
     private void updateDrawerScrim() {
         boolean blur = blurView.hasBlur();
         if (blur) {
+            // the blur is already darkened band by band for legible white text
             drawer.setBackground(null);
-            blurView.setDim(brightWall ? 0.62f : 0.82f);
+            blurView.setDim(1f);
         } else {
             drawer.setBackgroundColor(brightWall ? 0x8C000000 : 0x59000000);
         }
@@ -594,11 +605,13 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private void loadBlur() {
         final Context app = getApplicationContext();
         wallWorker.execute(() -> {
-            final android.graphics.Bitmap b = Walls.loadBlur(app);
+            final Walls.Blur b = Walls.loadBlur(app);
             main.post(() -> {
                 if (isDestroyed()) return;
-                blurView.setBitmap(b);
+                blurView.setBitmap(b == null ? null : b.bitmap);
+                topLuma = b == null ? -1f : b.topLuma;
                 updateDrawerScrim();
+                updateTopScrim();
             });
         });
     }

@@ -401,7 +401,14 @@ final class Walls {
     }
 
     /** The blur for the current wallpaper, or null if the wallpaper wasn't set by us. */
-    static Bitmap loadBlur(Context c) {
+    /** The drawer backdrop, already darkened where needed, plus how bright the wallpaper's top is. */
+    static final class Blur {
+        final Bitmap bitmap;
+        final float topLuma; // 0..1 relative luminance of the top third of the wallpaper
+        Blur(Bitmap bitmap, float topLuma) { this.bitmap = bitmap; this.topLuma = topLuma; }
+    }
+
+    static Blur loadBlur(Context c) {
         SharedPreferences p = prefs(c);
         int id = wallpaperId(c);
         if (!blurFile(c).exists() || p.getInt("blurFor", -2) != id) {
@@ -411,8 +418,71 @@ final class Walls {
             saveBlur(c, cur, null);
             if (!blurFile(c).exists()) return null;
         }
-        Bitmap b = BitmapFactory.decodeFile(blurFile(c).getPath());
-        return b == null ? null : Icons.toHardware(b);
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inMutable = true;
+        Bitmap b = BitmapFactory.decodeFile(blurFile(c).getPath(), o);
+        if (b == null) return null;
+        float top = readable(b);
+        return new Blur(Icons.toHardware(b), top);
+    }
+
+    // white text needs about 4.5:1 contrast: (1.0 + 0.05) / (L + 0.05) >= 4.5  ->  L <= ~0.18
+    private static final float TEXT_SAFE_LUMA = 0.16f;
+
+    private static float lin(int c8) {
+        float c = c8 / 255f;
+        return c <= 0.04045f ? c / 12.92f : (float) Math.pow((c + 0.055f) / 1.055f, 2.4f);
+    }
+
+    /**
+     * Darkens the blurred wallpaper band by band, only as much as white text needs: a pale sky
+     * gets dimmed, already-dark areas are left alone. Done once on a worker thread and baked
+     * into the bitmap, so drawing the drawer costs nothing extra. Returns the top's brightness.
+     */
+    static float readable(Bitmap b) {
+        int w = b.getWidth(), h = b.getHeight();
+        int[] px = new int[w * h];
+        b.getPixels(px, 0, w, 0, 0, w, h);
+        float[] factor = new float[h];
+        float[] rowLuma = new float[w];
+        float topSum = 0;
+        int topRows = Math.max(1, h / 3);
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int p = px[y * w + x];
+                rowLuma[x] = 0.2126f * lin((p >> 16) & 255) + 0.7152f * lin((p >> 8) & 255) + 0.0722f * lin(p & 255);
+            }
+            java.util.Arrays.sort(rowLuma);
+            float l90 = rowLuma[(int) (w * 0.9f)]; // judge by the brighter parts of the row
+            if (y < topRows) topSum += rowLuma[w / 2];
+            // scaling sRGB by f scales linear luminance by about f^2.2
+            factor[y] = l90 <= TEXT_SAFE_LUMA ? 1f
+                    : Math.max(0.3f, (float) Math.pow(TEXT_SAFE_LUMA / l90, 1 / 2.2));
+        }
+        // smooth so the darkening has no visible bands
+        float[] smooth = new float[h];
+        int r = Math.max(2, h / 20);
+        for (int y = 0; y < h; y++) {
+            float min = 1f, sum = 0;
+            int n = 0;
+            for (int k = -r; k <= r; k++) {
+                int yy = Math.max(0, Math.min(h - 1, y + k));
+                min = Math.min(min, factor[yy]);
+                sum += factor[yy];
+                n++;
+            }
+            smooth[y] = 0.6f * min + 0.4f * (sum / n); // lean towards the darker neighbour
+        }
+        for (int y = 0; y < h; y++) {
+            float f = smooth[y] * 0.94f; // a touch of depth everywhere
+            for (int x = 0; x < w; x++) {
+                int i = y * w + x, p = px[i];
+                int rr = Math.round(((p >> 16) & 255) * f), gg = Math.round(((p >> 8) & 255) * f), bb = Math.round((p & 255) * f);
+                px[i] = (p & 0xFF000000) | (rr << 16) | (gg << 8) | bb;
+            }
+        }
+        b.setPixels(px, 0, w, 0, 0, w, h);
+        return topSum / topRows;
     }
 
     /** Separable box blur in place; three passes approximate a gaussian. */
