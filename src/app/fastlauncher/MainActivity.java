@@ -76,6 +76,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private BlurView blurView, coverView;
     private LinearLayout dateRow, weatherChip;
     private TextView agenda;
+    private SearchExtras extras;
     private Weather.Glyph weatherGlyph;
     private TextView weatherText;
     private boolean weatherLoading, coverPending;
@@ -481,9 +482,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         bp.topMargin = headerTop;
         bp.rightMargin = dpi(14);
         btnSearch.setLayoutParams(bp);
-        FrameLayout.LayoutParams gp = (FrameLayout.LayoutParams) grid.getLayoutParams();
-        gp.topMargin = insetTop + dpi(92);
-        grid.setLayoutParams(gp);
+        setGridTop(0);
         grid.setBottomInset(insetBottom);
     }
 
@@ -1035,7 +1034,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private void ensureSearch() {
         if (search != null) return;
         search = new EditText(this);
-        search.setHint("Search apps");
+        search.setHint("Search apps, contacts, maths");
         search.setHintTextColor(0x99FFFFFF);
         search.setTextColor(Color.WHITE);
         search.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
@@ -1051,9 +1050,16 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         });
         search.setOnEditorActionListener((v, action, ev) -> {
             if (!shown.isEmpty()) launch(shown.get(0), grid, 0);
+            else extras.runDefault();
             return true;
         });
         drawer.addView(search, new FrameLayout.LayoutParams(-1, dpi(48), Gravity.TOP));
+        extras = new SearchExtras(this, new SearchExtras.Host() {
+            @Override public void start(Intent i, View from) { startSafely(i, from); }
+            @Override public void snack(String msg) { MainActivity.this.snack(msg); }
+            @Override public void onExtrasHeight(int px) { setGridTop(px == 0 ? 0 : px + dpi(12)); }
+        });
+        drawer.addView(extras, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
         placeSearch();
     }
 
@@ -1063,6 +1069,19 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         sp.leftMargin = dpi(16);
         sp.rightMargin = dpi(16);
         search.setLayoutParams(sp);
+        FrameLayout.LayoutParams ep = (FrameLayout.LayoutParams) extras.getLayoutParams();
+        ep.topMargin = sp.topMargin + dpi(48 + 12);
+        ep.leftMargin = ep.rightMargin = dpi(16);
+        extras.setLayoutParams(ep);
+    }
+
+    /** Push the app grid down to make room for the search extras (0 = normal position). */
+    private void setGridTop(int extra) {
+        FrameLayout.LayoutParams gp = (FrameLayout.LayoutParams) grid.getLayoutParams();
+        int top = insetTop + dpi(92) + extra;
+        if (gp.topMargin == top) return;
+        gp.topMargin = top;
+        grid.setLayoutParams(gp);
     }
 
     private void beginSearch() {
@@ -1084,6 +1103,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(search.getWindowToken(), 0);
             search.setVisibility(View.GONE);
         }
+        if (extras != null) extras.update("");
         title.setVisibility(View.VISIBLE);
         title.setAlpha(1f);
         btnSearch.setVisibility(View.VISIBLE);
@@ -1092,6 +1112,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     }
 
     private void filter(String q) {
+        if (extras != null) extras.update(q);
         q = q.trim().toLowerCase(Locale.getDefault());
         if (q.isEmpty()) { shown = drawerApps; grid.setItems(drawerApps); return; }
         // prefix matches (on any word) first, then anything containing the text
@@ -1099,6 +1120,8 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         for (AppGridView.AppEntry e : drawerApps) {
             if (e.lower.startsWith(q) || e.lower.contains(" " + q)) starts.add(e);
             else if (e.lower.contains(q)) contains.add(e);
+            // "whatsapp" should still find "WA Business" (com.whatsapp.w4b)
+            else if (q.length() >= 3 && e.cn.getPackageName().contains(q)) contains.add(e);
         }
         starts.addAll(contains);
         shown = starts;

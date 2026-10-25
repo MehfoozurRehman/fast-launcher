@@ -256,13 +256,16 @@ final class ControlPanel extends FrameLayout {
         mcol.addView(mediaArtist, Ui.lp(-1, -2, Ui.dpi(c, 2)));
         mcol.addView(new View(c), new LinearLayout.LayoutParams(1, 0, 1f));
         mediaBar = new Progress(c);
-        mcol.addView(mediaBar, Ui.lp(-1, Ui.dpi(c, 3)));
+        mediaBar.seek = this::seekTo;
+        mcol.addView(mediaBar, Ui.lp(-1, Ui.dpi(c, 18)));
         LinearLayout times = new LinearLayout(c);
         mediaTime = Ui.text(c, "", 10.5f, 0xB3FFFFFF, false);
         mediaLeft = Ui.text(c, "", 10.5f, 0xB3FFFFFF, false);
         times.addView(mediaTime, new LinearLayout.LayoutParams(0, -2, 1f));
         times.addView(mediaLeft);
-        mcol.addView(times, Ui.lp(-1, -2, Ui.dpi(c, 4)));
+        mcol.addView(times, Ui.lp(-1, -2));
+        mediaFull.setClickable(true);
+        mediaFull.setOnClickListener(v -> openPlayer());
         LinearLayout controls = new LinearLayout(c);
         controls.setGravity(Gravity.CENTER);
         controls.addView(mediaButton(c, PanelIcons.PREV, false, () -> { if (controller != null) controller.getTransportControls().skipToPrevious(); }),
@@ -424,7 +427,11 @@ final class ControlPanel extends FrameLayout {
         safe(() -> {
             Calendar cal = Calendar.getInstance();
             time.setText(MainActivity.clockText(cal));
-            date.setText(new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(cal.getTime()));
+            String d = new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(cal.getTime());
+            android.os.BatteryManager bm = (android.os.BatteryManager) c.getSystemService(Context.BATTERY_SERVICE);
+            int level = bm == null ? -1 : bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY);
+            if (level >= 0) d += "  ·  " + level + "%" + (bm.isCharging() ? (level >= 100 ? " charged" : " charging") : "");
+            setIfChanged(date, d);
         });
         final WifiManager wm = (WifiManager) c.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         safe(() -> {
@@ -841,22 +848,36 @@ final class ControlPanel extends FrameLayout {
 
     private void openNotif(android.service.notification.StatusBarNotification s) {
         android.app.Notification n = s.getNotification();
-        if (n.contentIntent != null) {
-            try {
-                android.app.ActivityOptions o = android.app.ActivityOptions.makeBasic();
-                if (android.os.Build.VERSION.SDK_INT >= 34)
-                    o.setPendingIntentBackgroundActivityStartMode(android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED);
-                n.contentIntent.send(getContext(), 0, null, null, null, null, o.toBundle());
-            } catch (Exception e) {
-                openApp(s.getPackageName());
-                return;
-            }
-        } else {
-            openApp(s.getPackageName());
-            return;
-        }
+        if (!send(n.contentIntent)) { openApp(s.getPackageName()); return; }
         if ((n.flags & android.app.Notification.FLAG_AUTO_CANCEL) != 0) NotifService.dismiss(s.getKey());
         close();
+    }
+
+    /** Fire an app's PendingIntent from the panel (allowed to start its activity from the background). */
+    private boolean send(android.app.PendingIntent pi) {
+        if (pi == null) return false;
+        try {
+            android.app.ActivityOptions o = android.app.ActivityOptions.makeBasic();
+            if (android.os.Build.VERSION.SDK_INT >= 34)
+                o.setPendingIntentBackgroundActivityStartMode(android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED);
+            pi.send(getContext(), 0, null, null, null, null, o.toBundle());
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Tap the now-playing card: open the player that owns it. */
+    private void openPlayer() {
+        if (controller == null) return;
+        if (send(controller.getSessionActivity())) { close(); return; }
+        openApp(controller.getPackageName());
+    }
+
+    private void seekTo(float fraction) {
+        if (controller == null || controller.getMetadata() == null) return;
+        long dur = controller.getMetadata().getLong(MediaMetadata.METADATA_KEY_DURATION);
+        if (dur > 0) controller.getTransportControls().seekTo(Math.round(dur * fraction));
     }
 
     private CharSequence appName(String pkg) {
@@ -1145,27 +1166,66 @@ final class ControlPanel extends FrameLayout {
         void setLabel(String s) { setIfChanged(label, s); }
     }
 
-    /** Thin progress line for the media card. */
+    /**
+     * Thin progress line for the media card, in a taller touch area: drag along it to seek
+     * (it thickens while held), released position is sent to the player.
+     */
     static final class Progress extends View {
+        interface Seek { void seekTo(float fraction); }
+
+        Seek seek;
         private float f;
+        private boolean held;
+        private final float bar, barHeld;
         private final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG), fill = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         Progress(Context c) {
             super(c);
+            bar = Ui.dp(c, 3);
+            barHeld = Ui.dp(c, 6);
             track.setColor(0x4DFFFFFF);
             fill.setColor(Color.WHITE);
         }
 
         void setFraction(float v) {
-            if (Math.abs(v - f) < 0.0005f) return;
+            if (held || Math.abs(v - f) < 0.0005f) return; // the finger wins while seeking
             f = v;
             invalidate();
         }
 
         @Override protected void onDraw(Canvas c) {
-            float h = getHeight(), r = h / 2f;
-            c.drawRoundRect(0, 0, getWidth(), h, r, r, track);
-            c.drawRoundRect(0, 0, Math.max(h, getWidth() * f), h, r, r, fill);
+            float h = held ? barHeld : bar, r = h / 2f, top = (getHeight() - h) / 2f;
+            c.drawRoundRect(0, top, getWidth(), top + h, r, r, track);
+            c.drawRoundRect(0, top, Math.max(h, getWidth() * f), top + h, r, r, fill);
+        }
+
+        @Override public boolean onTouchEvent(MotionEvent e) {
+            if (seek == null) return false;
+            float v = Math.max(0f, Math.min(1f, e.getX() / Math.max(1, getWidth())));
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    held = true;
+                    getParent().requestDisallowInterceptTouchEvent(true);
+                    f = v;
+                    invalidate();
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    f = v;
+                    invalidate();
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    held = false;
+                    f = v;
+                    invalidate();
+                    seek.seekTo(v);
+                    performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    held = false;
+                    invalidate();
+                    return true;
+            }
+            return true;
         }
     }
 

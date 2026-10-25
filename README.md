@@ -8,7 +8,7 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   alarms / calendar / weather app), two-row dock with notification badges.
 - **Drawer**: swipe up over a blurred copy of the wallpaper. It follows your finger and the rows cascade in,
   so a slow drag shows the transition and a flick finishes fast. It can be caught mid-animation.
-  Search launches the top hit on Enter.
+  Search finds apps, contacts and sums (`12*8+4`), with a web search below; Enter launches the top hit.
 - **Wallpaper swaps** cross-fade: the launcher shows the new image itself while Android rebinds its
   wallpaper window, hiding the black blink.
 - **Icons**: pebbles. Each app sits on a white organic blob plate, with its own artwork set into an
@@ -24,7 +24,7 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   swipe it sideways to dismiss, or Clear all. The bell in the panel's header switches between pages.
 - **Control panel, from any app**: swipe down from the right half of the status bar (needs the
   "Fast Launcher controls" accessibility service, which reads no screen content). Wi-Fi, Mobile data,
-  Bluetooth and Torch tiles; a now-playing card (album art, live progress, controls) beside tall brightness and volume sliders that show the real level; and a
+  Bluetooth and Torch tiles; a now-playing card (album art, live progress you can drag to seek, controls; tap it to open the player) beside tall brightness and volume sliders that show the real level; and a
   grid with Hotspot, Auto-rotate, Aeroplane, Location, Dark mode, Do not disturb, Sound mode, Eye
   comfort, Battery saver, Screenshot, Screen record, Cast, Calculator, Recorder, Lock and Power.
   Controls Android lets apps change are switched in place; the rest open their exact system page.
