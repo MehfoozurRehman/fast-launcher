@@ -71,7 +71,12 @@ final class ControlPanel extends FrameLayout {
     private final PanelIcons notifBell;
     private final TextView notifCount, notifEmpty, clearAll;
     private final ScrollView notifScroll;
-    private boolean onNotifs, notifsDirty = true;
+    private boolean notifsDirty = true;
+    static final int CONTROLS = 0, NOTIFS = 1, BT = 2;
+    private int page = CONTROLS;
+    private final ScrollView btScroll;
+    private final LinearLayout btList;
+    private final TextView btToggle;
     final boolean isDark = Ui.dark; // the palette this panel was built in
     private final View scrim;
     private final LinearLayout card;
@@ -157,7 +162,7 @@ final class ControlPanel extends FrameLayout {
         notifButton.addView(notifCount, ncp);
         notifButton.setClickable(true);
         Ui.pressable(notifButton);
-        notifButton.setOnClickListener(v -> showNotifications(!onNotifs));
+        notifButton.setOnClickListener(v -> showPage(page == NOTIFS ? CONTROLS : NOTIFS));
         LinearLayout.LayoutParams nbp = Ui.lp(-2, Ui.dpi(c, 44));
         nbp.rightMargin = Ui.dpi(c, 8);
         head.addView(notifButton, nbp);
@@ -197,7 +202,7 @@ final class ControlPanel extends FrameLayout {
         clearAll.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 18)));
         clearAll.setClickable(true);
         Ui.pressable(clearAll);
-        clearAll.setOnClickListener(v -> { NotifService.dismissAll(); showNotifications(false); });
+        clearAll.setOnClickListener(v -> { NotifService.dismissAll(); showPage(CONTROLS); });
         nhead.addView(clearAll, Ui.lp(-2, Ui.dpi(c, 36)));
         npage.addView(nhead, Ui.lp(-1, -2));
         notifList = new LinearLayout(c);
@@ -213,6 +218,49 @@ final class ControlPanel extends FrameLayout {
         card.addView(notifScroll, nlp);
         NotifService.panelListener = this::onNotifsChanged;
 
+        // ---- the Bluetooth page
+        btScroll = new ScrollView(c);
+        btScroll.setVerticalScrollBarEnabled(false);
+        btScroll.setOverScrollMode(OVER_SCROLL_NEVER);
+        LinearLayout bpage = new LinearLayout(c);
+        bpage.setOrientation(LinearLayout.VERTICAL);
+        bpage.setPadding(pad, 0, pad, Ui.dpi(c, 4));
+        LinearLayout bhead = new LinearLayout(c);
+        bhead.setGravity(Gravity.CENTER_VERTICAL);
+        TextView back = Ui.text(c, "\u2039", 26, Ui.FG, false);
+        back.setGravity(Gravity.CENTER);
+        back.setPadding(0, 0, 0, Ui.dpi(c, 3));
+        back.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 18)));
+        back.setClickable(true);
+        Ui.pressable(back);
+        back.setOnClickListener(v -> showPage(CONTROLS));
+        bhead.addView(back, Ui.lp(Ui.dpi(c, 36), Ui.dpi(c, 36)));
+        TextView btitle = Ui.text(c, "Bluetooth", 17, Ui.FG, true);
+        btitle.setTypeface(Ui.font(c, 650));
+        btitle.setPadding(Ui.dpi(c, 12), 0, 0, 0);
+        bhead.addView(btitle, new LinearLayout.LayoutParams(0, -2, 1f));
+        btToggle = Ui.text(c, "On", 13.5f, Color.WHITE, true);
+        btToggle.setTypeface(Ui.font(c, 600));
+        btToggle.setGravity(Gravity.CENTER);
+        btToggle.setPadding(Ui.dpi(c, 18), 0, Ui.dpi(c, 18), 0);
+        btToggle.setClickable(true);
+        Ui.pressable(btToggle);
+        btToggle.setOnClickListener(v -> requestBt(!btOn()));
+        bhead.addView(btToggle, Ui.lp(-2, Ui.dpi(c, 36)));
+        bpage.addView(bhead, Ui.lp(-1, -2));
+        btList = new LinearLayout(c);
+        btList.setOrientation(LinearLayout.VERTICAL);
+        bpage.addView(btList, Ui.lp(-1, -2, Ui.dpi(c, 12)));
+        LinearLayout bfoot = new LinearLayout(c);
+        bfoot.addView(pill(c, "Pair new device", () -> open(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS))),
+                new LinearLayout.LayoutParams(0, Ui.dpi(c, 44), 1f));
+        bpage.addView(bfoot, Ui.lp(-1, -2, Ui.dpi(c, 12)));
+        btScroll.addView(bpage);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(-1, 0, 1f);
+        blp.topMargin = Ui.dpi(c, 12);
+        btScroll.setVisibility(GONE);
+        card.addView(btScroll, blp);
+
         // ---- four tiles, each its own button
         wifi = new Item(c, PanelIcons.WIFI, "Wi-Fi");
         data = new Item(c, PanelIcons.DATA, "Mobile data");
@@ -222,7 +270,9 @@ final class ControlPanel extends FrameLayout {
         body.addView(pair(c, bluetooth, torch), Ui.lp(-1, Ui.dpi(c, 64), Ui.dpi(c, 8)));
         wifi.setOnClickListener(v -> open(new Intent(Settings.Panel.ACTION_WIFI)));
         wifi.setOnLongClickListener(v -> { open(new Intent(Settings.ACTION_WIFI_SETTINGS)); return true; });
-        bluetooth.setOnClickListener(v -> open(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)));
+        // on: show paired devices here; off: Android's one-tap "turn on" prompt. Long-press: settings
+        bluetooth.setOnClickListener(v -> { if (btOn()) showPage(BT); else requestBt(true); });
+        bluetooth.setOnLongClickListener(v -> { open(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); return true; });
         data.setOnClickListener(v -> open(new Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)));
         torch.setOnClickListener(v -> safe(this::toggleTorch));
 
@@ -327,14 +377,14 @@ final class ControlPanel extends FrameLayout {
         recorder = new Round(c, PanelIcons.MIC, "Recorder");
         lock = new Round(c, PanelIcons.LOCK, "Lock");
         power = new Round(c, PanelIcons.POWER, "Power");
-        LinearLayout grid = new LinearLayout(c);
-        grid.setOrientation(LinearLayout.VERTICAL);
+        // long-press any of them and drag to rearrange; the order is remembered
+        RoundGrid grid = new RoundGrid(c, Ui.dpi(c, 10));
         grid.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 24)));
         grid.setPadding(Ui.dpi(c, 4), Ui.dpi(c, 14), Ui.dpi(c, 4), Ui.dpi(c, 12));
-        grid.addView(row(c, hotspot, rotate, plane, location));
-        grid.addView(row(c, dark, dnd, sound, eye), Ui.lp(-1, -2, Ui.dpi(c, 10)));
-        grid.addView(row(c, saver, screenshot, record, cast), Ui.lp(-1, -2, Ui.dpi(c, 10)));
-        grid.addView(row(c, calc, recorder, lock, power), Ui.lp(-1, -2, Ui.dpi(c, 10)));
+        final android.content.SharedPreferences prefs = c.getSharedPreferences("panel", Context.MODE_PRIVATE);
+        grid.setRounds(java.util.Arrays.asList(hotspot, rotate, plane, location, dark, dnd, sound, eye,
+                saver, screenshot, record, cast, calc, recorder, lock, power), prefs.getString("order", ""));
+        grid.saved = ids -> prefs.edit().putString("order", ids).apply();
         body.addView(grid, Ui.lp(-1, -2, Ui.dpi(c, 10)));
 
         hotspot.setOnClickListener(v -> open(new Intent(Settings.ACTION_WIRELESS_SETTINGS)));
@@ -420,7 +470,7 @@ final class ControlPanel extends FrameLayout {
     void refresh(boolean notifications) {
         final Context c = getContext();
         scroll.scrollTo(0, 0);
-        showNotifications(notifications);
+        showPage(notifications ? NOTIFS : CONTROLS);
         showNotifCount();
         // Each reading is isolated: this runs in the launcher's process, and one OEM quirk or
         // missing permission must never take the home screen down with it.
@@ -745,6 +795,138 @@ final class ControlPanel extends FrameLayout {
         controller = null;
     }
 
+    // ================================================================ bluetooth
+
+    private final java.util.Set<String> btConnected = new java.util.HashSet<>();
+    private boolean btProxies;
+
+    private android.bluetooth.BluetoothAdapter btAdapter() {
+        android.bluetooth.BluetoothManager bm = (android.bluetooth.BluetoothManager) getContext().getSystemService(Context.BLUETOOTH_SERVICE);
+        return bm == null ? null : bm.getAdapter();
+    }
+
+    private boolean btOn() {
+        try { android.bluetooth.BluetoothAdapter a = btAdapter(); return a != null && a.isEnabled(); }
+        catch (Exception e) { return false; }
+    }
+
+    /** Apps can't switch Bluetooth themselves any more; Android shows its own one-tap prompt. */
+    private void requestBt(boolean on) {
+        Intent i = new Intent(on ? android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE
+                : "android.bluetooth.adapter.action.REQUEST_DISABLE");
+        if (i.resolveActivity(getContext().getPackageManager()) == null) i = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
+        open(i);
+    }
+
+    /** Which paired devices are connected: asked of the audio profiles (headphones, speakers, cars). */
+    private void watchBtProfiles() {
+        if (btProxies) return;
+        android.bluetooth.BluetoothAdapter a = btAdapter();
+        if (a == null) return;
+        btProxies = true;
+        android.bluetooth.BluetoothProfile.ServiceListener l = new android.bluetooth.BluetoothProfile.ServiceListener() {
+            @Override public void onServiceConnected(int profile, android.bluetooth.BluetoothProfile proxy) {
+                try {
+                    for (android.bluetooth.BluetoothDevice d : proxy.getConnectedDevices()) btConnected.add(d.getAddress());
+                } catch (Exception ignored) {}
+                if (page == BT) buildBt();
+            }
+            @Override public void onServiceDisconnected(int profile) {}
+        };
+        int[] profiles = {android.bluetooth.BluetoothProfile.A2DP, android.bluetooth.BluetoothProfile.HEADSET,
+                android.bluetooth.BluetoothProfile.HEARING_AID, 22 /* LE_AUDIO */};
+        for (int pr : profiles) try { a.getProfileProxy(getContext(), l, pr); } catch (Exception ignored) {}
+    }
+
+    private void buildBt() {
+        Context c = getContext();
+        boolean on = btOn();
+        btToggle.setText(on ? "On" : "Off");
+        btToggle.setTextColor(on ? Color.WHITE : Ui.FG);
+        btToggle.setBackground(Ui.round(on ? Ui.ACCENT : Ui.GROUP, Ui.dp(c, 18)));
+        btList.removeAllViews();
+        if (!on) { btList.addView(btMessage(c, "Bluetooth is off")); return; }
+        java.util.List<android.bluetooth.BluetoothDevice> devices = new java.util.ArrayList<>();
+        try {
+            devices.addAll(btAdapter().getBondedDevices());
+        } catch (SecurityException e) {
+            btList.addView(btMessage(c, "Allow \u201CNearby devices\u201D for Fast Launcher to list them here"));
+            return;
+        }
+        watchBtProfiles();
+        java.util.Collections.sort(devices, (x, y) -> {
+            boolean cx = btConnected.contains(x.getAddress()), cy = btConnected.contains(y.getAddress());
+            if (cx != cy) return cx ? -1 : 1;
+            return String.valueOf(btName(x)).compareToIgnoreCase(String.valueOf(btName(y)));
+        });
+        if (devices.isEmpty()) { btList.addView(btMessage(c, "No paired devices yet")); return; }
+        for (android.bluetooth.BluetoothDevice d : devices) {
+            boolean connected = btConnected.contains(d.getAddress());
+            LinearLayout r = new LinearLayout(c);
+            r.setGravity(Gravity.CENTER_VERTICAL);
+            r.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 22)));
+            int p = Ui.dpi(c, 10);
+            r.setPadding(p, p, Ui.dpi(c, 16), p);
+            PanelIcons icon = new PanelIcons(c, btAudio(d) ? PanelIcons.SPEAKER : PanelIcons.BLUETOOTH, connected ? Color.WHITE : Ui.FG);
+            int ip = Ui.dpi(c, 11);
+            icon.setPadding(ip, ip, ip, ip);
+            icon.setBackground(Ui.round(connected ? Ui.ACCENT : Ui.ICON_BG, Ui.dp(c, 22)));
+            r.addView(icon, Ui.lp(Ui.dpi(c, 44), Ui.dpi(c, 44)));
+            LinearLayout col = new LinearLayout(c);
+            col.setOrientation(LinearLayout.VERTICAL);
+            col.setPadding(Ui.dpi(c, 12), 0, 0, 0);
+            TextView name = Ui.text(c, btName(d), 14.5f, Ui.FG, true);
+            name.setTypeface(Ui.font(c, 600));
+            name.setSingleLine(true);
+            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            col.addView(name);
+            col.addView(Ui.text(c, connected ? "Connected" : "Paired", 12, connected ? Ui.ACCENT : Ui.FG2, false), Ui.lp(-2, -2, Ui.dpi(c, 2)));
+            r.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
+            r.setClickable(true);
+            Ui.pressable(r);
+            // connecting is reserved for system apps: Bluetooth settings connects it in one tap
+            r.setOnClickListener(v -> open(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)));
+            btList.addView(r, Ui.lp(-1, -2, btList.getChildCount() == 0 ? 0 : Ui.dpi(c, 8)));
+        }
+    }
+
+    private static String btName(android.bluetooth.BluetoothDevice d) {
+        try {
+            String n = d.getAlias();
+            if (n == null || n.isEmpty()) n = d.getName();
+            return n == null || n.isEmpty() ? d.getAddress() : n;
+        } catch (SecurityException e) {
+            return "Device";
+        }
+    }
+
+    private static boolean btAudio(android.bluetooth.BluetoothDevice d) {
+        try {
+            android.bluetooth.BluetoothClass k = d.getBluetoothClass();
+            return k != null && k.getMajorDeviceClass() == android.bluetooth.BluetoothClass.Device.Major.AUDIO_VIDEO;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private TextView btMessage(Context c, String msg) {
+        TextView t = Ui.text(c, msg, 14, Ui.FG2, false);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(Ui.dpi(c, 16), Ui.dpi(c, 28), Ui.dpi(c, 16), Ui.dpi(c, 28));
+        return t;
+    }
+
+    private TextView pill(Context c, String label, Runnable r) {
+        TextView t = Ui.text(c, label, 14, Ui.FG, true);
+        t.setTypeface(Ui.font(c, 600));
+        t.setGravity(Gravity.CENTER);
+        t.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 22)));
+        t.setClickable(true);
+        Ui.pressable(t);
+        t.setOnClickListener(v -> r.run());
+        return t;
+    }
+
     // ================================================================ notifications
 
     private final java.util.Map<String, CharSequence> appNames = new java.util.HashMap<>();
@@ -753,7 +935,7 @@ final class ControlPanel extends FrameLayout {
     private void onNotifsChanged() {
         notifsDirty = true;
         showNotifCount();
-        if (onNotifs) buildNotifs();
+        if (page == NOTIFS) buildNotifs();
     }
 
     private void showNotifCount() {
@@ -762,17 +944,24 @@ final class ControlPanel extends FrameLayout {
         notifCount.setVisibility(n == 0 ? GONE : VISIBLE);
     }
 
-    private void showNotifications(boolean show) {
-        if (show && notifsDirty) buildNotifs();
-        if (show == onNotifs) return;
-        onNotifs = show;
+    private ScrollView pageScroll() { return page == NOTIFS ? notifScroll : page == BT ? btScroll : scroll; }
+
+    /** The card shows one page at a time: the controls, the notifications, or Bluetooth devices. */
+    private void showPage(int p) {
+        if (p == NOTIFS && notifsDirty) buildNotifs();
+        if (p == BT) buildBt();
+        if (p == page) return;
+        page = p;
         Context c = getContext();
         notifScroll.scrollTo(0, 0);
-        notifScroll.setVisibility(show ? VISIBLE : GONE);
-        scroll.setVisibility(show ? GONE : VISIBLE);
-        notifButton.setBackground(Ui.round(show ? Ui.ACCENT : Ui.GROUP, Ui.dp(c, 22)));
-        notifBell.setColor(show ? Color.WHITE : Ui.FG);
-        notifCount.setTextColor(show ? Color.WHITE : Ui.FG);
+        btScroll.scrollTo(0, 0);
+        scroll.setVisibility(p == CONTROLS ? VISIBLE : GONE);
+        notifScroll.setVisibility(p == NOTIFS ? VISIBLE : GONE);
+        btScroll.setVisibility(p == BT ? VISIBLE : GONE);
+        boolean n = p == NOTIFS;
+        notifButton.setBackground(Ui.round(n ? Ui.ACCENT : Ui.GROUP, Ui.dp(c, 22)));
+        notifBell.setColor(n ? Color.WHITE : Ui.FG);
+        notifCount.setTextColor(n ? Color.WHITE : Ui.FG);
     }
 
     private void buildNotifs() {
@@ -1033,7 +1222,9 @@ final class ControlPanel extends FrameLayout {
 
     @Override public boolean dispatchKeyEvent(android.view.KeyEvent e) {
         if (e.getKeyCode() == android.view.KeyEvent.KEYCODE_BACK) {
-            if (e.getAction() == android.view.KeyEvent.ACTION_UP) close();
+            if (e.getAction() == android.view.KeyEvent.ACTION_UP) {
+                if (page == BT) showPage(CONTROLS); else close();
+            }
             return true;
         }
         return super.dispatchKeyEvent(e);
@@ -1051,7 +1242,7 @@ final class ControlPanel extends FrameLayout {
             case MotionEvent.ACTION_MOVE:
                 if (vt != null) vt.addMovement(e);
                 float dy = e.getRawY() - downY, dx = e.getRawX() - downX;
-                if (dy < -slop && Math.abs(dy) > Math.abs(dx) && !(onNotifs ? notifScroll : scroll).canScrollVertically(1)) {
+                if (dy < -slop && Math.abs(dy) > Math.abs(dx) && !pageScroll().canScrollVertically(1)) {
                     dragging = true;
                     downY = e.getRawY();
                     startProgress = progress;
@@ -1133,10 +1324,12 @@ final class ControlPanel extends FrameLayout {
     /** A round toggle with a caption underneath. */
     static final class Round extends LinearLayout {
         final PanelIcons icon;
+        final String id; // stays the same when the label changes (Sound -> Vibrate)
         private final TextView label;
 
         Round(Context c, int type, String name) {
             super(c);
+            id = name;
             setOrientation(VERTICAL);
             setGravity(Gravity.CENTER_HORIZONTAL);
             icon = new PanelIcons(c, type, Ui.FG);
@@ -1224,6 +1417,135 @@ final class ControlPanel extends FrameLayout {
                     held = false;
                     invalidate();
                     return true;
+            }
+            return true;
+        }
+    }
+
+    /**
+     * The 4x4 grid of round toggles. Long-press one to lift it, drag it over another slot and the
+     * rest shift to make room; letting go saves the order.
+     */
+    static final class RoundGrid extends LinearLayout {
+        interface Saved { void onOrder(String ids); }
+
+        Saved saved;
+        private final java.util.List<Round> order = new java.util.ArrayList<>();
+        private final LinearLayout[] rows = new LinearLayout[4];
+        private Round dragged;
+        private float lastX, lastY, grabX, grabY;
+
+        RoundGrid(Context c, int gap) {
+            super(c);
+            setOrientation(VERTICAL);
+            setClipChildren(false);
+            setChildrenDrawingOrderEnabled(true); // the lifted button's row draws on top
+            for (int i = 0; i < rows.length; i++) {
+                rows[i] = new LinearLayout(c);
+                rows[i].setClipChildren(false);
+                addView(rows[i], Ui.lp(-1, -2, i == 0 ? 0 : gap));
+            }
+        }
+
+        void setRounds(java.util.List<Round> rounds, String savedIds) {
+            order.clear();
+            for (String id : savedIds.split(",")) {
+                for (Round r : rounds) if (r.id.equals(id) && !order.contains(r)) order.add(r);
+            }
+            for (Round r : rounds) if (!order.contains(r)) order.add(r); // new ones go at the end
+            for (final Round r : order) r.setOnLongClickListener(v -> { lift(r); return true; });
+            place();
+        }
+
+        private void place() {
+            for (LinearLayout row : rows) row.removeAllViews();
+            for (int i = 0; i < order.size(); i++) {
+                rows[Math.min(rows.length - 1, i / 4)].addView(order.get(i), new LinearLayout.LayoutParams(0, -2, 1f));
+            }
+        }
+
+        private void lift(Round r) {
+            dragged = r;
+            getParent().requestDisallowInterceptTouchEvent(true);
+            r.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            LinearLayout row = (LinearLayout) r.getParent();
+            grabX = lastX - (row.getLeft() + r.getLeft() + r.getWidth() / 2f);
+            grabY = lastY - (row.getTop() + r.getTop() + r.getHeight() / 2f);
+            r.animate().cancel();
+            r.animate().scaleX(1.15f).scaleY(1.15f).alpha(1f).setDuration(120).start();
+            invalidate();
+        }
+
+        private int slotAt(float x, float y) {
+            int ri = rows.length - 1;
+            for (int i = 0; i < rows.length; i++) if (y < rows[i].getBottom()) { ri = i; break; }
+            float cell = rows[ri].getWidth() / 4f;
+            int col = Math.max(0, Math.min(3, (int) ((x - rows[ri].getLeft()) / Math.max(1f, cell))));
+            return Math.min(order.size() - 1, ri * 4 + col);
+        }
+
+        /** Keep the lifted button under the finger, wherever the layout has put its slot. */
+        private void follow() {
+            if (dragged == null || dragged.getParent() == null) return;
+            LinearLayout row = (LinearLayout) dragged.getParent();
+            dragged.setTranslationX(lastX - grabX - (row.getLeft() + dragged.getLeft() + dragged.getWidth() / 2f));
+            dragged.setTranslationY(lastY - grabY - (row.getTop() + dragged.getTop() + dragged.getHeight() / 2f));
+        }
+
+        @Override protected void onLayout(boolean changed, int l, int t, int r, int b) {
+            super.onLayout(changed, l, t, r, b);
+            follow();
+        }
+
+        @Override protected int getChildDrawingOrder(int count, int i) {
+            int top = dragged == null ? -1 : indexOfChild((View) dragged.getParent());
+            if (top < 0) return i;
+            if (i == count - 1) return top;
+            return i >= top ? i + 1 : i;
+        }
+
+        @Override public boolean onInterceptTouchEvent(MotionEvent e) {
+            lastX = e.getX();
+            lastY = e.getY();
+            return dragged != null;
+        }
+
+        @Override public boolean onTouchEvent(MotionEvent e) {
+            if (dragged == null) return false;
+            lastX = e.getX();
+            lastY = e.getY();
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_MOVE: {
+                    // the press animation of the button was cancelled when we took over: stay lifted
+                    if (dragged.getScaleX() < 1.15f) {
+                        dragged.animate().cancel();
+                        dragged.setScaleX(1.15f);
+                        dragged.setScaleY(1.15f);
+                        dragged.setAlpha(1f);
+                    }
+                    int to = slotAt(lastX, lastY), from = order.indexOf(dragged);
+                    if (to != from) {
+                        order.remove(dragged);
+                        order.add(to, dragged);
+                        place();
+                        dragged.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                    } else {
+                        follow();
+                    }
+                    return true;
+                }
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL: {
+                    final Round r = dragged;
+                    dragged = null;
+                    r.animate().translationX(0f).translationY(0f).scaleX(1f).scaleY(1f).setDuration(180)
+                            .setInterpolator(Ui.EMPHASIZED).start();
+                    invalidate();
+                    StringBuilder ids = new StringBuilder();
+                    for (Round x : order) ids.append(ids.length() == 0 ? "" : ",").append(x.id);
+                    if (saved != null) saved.onOrder(ids.toString());
+                    return true;
+                }
             }
             return true;
         }

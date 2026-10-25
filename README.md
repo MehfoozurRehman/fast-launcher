@@ -28,6 +28,8 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   grid with Hotspot, Auto-rotate, Aeroplane, Location, Dark mode, Do not disturb, Sound mode, Eye
   comfort, Battery saver, Screenshot, Screen record, Cast, Calculator, Recorder, Lock and Power.
   Controls Android lets apps change are switched in place; the rest open their exact system page.
+  Tap Bluetooth to see paired devices and which one is connected (or to get Android's turn-on prompt).
+  Long-press any round button and drag it to rearrange the grid; the order is remembered.
   The pull strip is removed while the phone is locked.
 - **Light and dark mode**: the panel, menus and wallpaper sheet follow the system theme, using the
   same colours as the system's own pop-ups.
