@@ -1,6 +1,7 @@
 package app.fastlauncher;
 
 import android.app.Notification;
+import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 import android.service.notification.NotificationListenerService;
@@ -56,7 +57,99 @@ public class NotifService extends NotificationListenerService {
         });
         try { requestRebind(new android.content.ComponentName(this, NotifService.class)); } catch (Exception ignored) {}
     }
-    @Override public void onNotificationRemoved(StatusBarNotification sbn) { refresh(); }
+    @Override public void onNotificationRemoved(StatusBarNotification sbn, RankingMap ranking, int reason) {
+        // swiped away (here or in the system shade) or cleared: keep a copy for the history
+        if (reason == REASON_CANCEL || reason == REASON_CANCEL_ALL
+                || reason == REASON_LISTENER_CANCEL || reason == REASON_LISTENER_CANCEL_ALL) {
+            final Gone g = Gone.of(this, sbn);
+            if (g != null) main.post(() -> remember(g));
+        }
+        refresh();
+    }
+
+    // ---------------------------------------------------------------- history
+
+    /** A notification that was dismissed: enough to show it again and to open it. */
+    static final class Gone {
+        String pkg, title, text;
+        long posted, removed;
+        android.app.PendingIntent open; // only while the launcher's process lives; else the app opens
+
+        static Gone of(Context c, StatusBarNotification s) {
+            Notification n = s.getNotification();
+            if ((n.flags & (Notification.FLAG_ONGOING_EVENT | Notification.FLAG_GROUP_SUMMARY)) != 0) return null;
+            if (n.extras != null && n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) return null;
+            if (c.getPackageName().equals(s.getPackageName()) && !TEST_CHANNEL.equals(n.getChannelId())) return null;
+            CharSequence t = n.extras == null ? null : n.extras.getCharSequence(Notification.EXTRA_TITLE);
+            CharSequence x = n.extras == null ? null : n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT);
+            if (x == null && n.extras != null) x = n.extras.getCharSequence(Notification.EXTRA_TEXT);
+            if (t == null && x == null) return null;
+            Gone g = new Gone();
+            g.pkg = s.getPackageName();
+            g.title = t == null ? "" : t.toString();
+            g.text = x == null ? "" : x.toString();
+            g.posted = s.getPostTime();
+            g.removed = System.currentTimeMillis();
+            g.open = n.contentIntent;
+            return g;
+        }
+    }
+
+    private static final long KEEP = 24 * 3600_000L;
+    private static final int MAX = 50;
+    private static List<Gone> history;
+
+    /** Dismissed in the last day, newest first. Main thread only. */
+    static List<Gone> history(Context c) {
+        if (history == null) history = load(c);
+        long cutoff = System.currentTimeMillis() - KEEP;
+        for (java.util.Iterator<Gone> it = history.iterator(); it.hasNext(); ) if (it.next().removed < cutoff) it.remove();
+        return history;
+    }
+
+    static void clearHistory(Context c) {
+        history(c).clear();
+        save(c);
+    }
+
+    private void remember(Gone g) {
+        List<Gone> h = history(this);
+        h.add(0, g);
+        while (h.size() > MAX) h.remove(h.size() - 1);
+        save(this);
+        if (panelListener != null) panelListener.run();
+    }
+
+    // the text survives restarts (the open-intents can't): a small JSON list in preferences
+    private static void save(Context c) {
+        try {
+            org.json.JSONArray a = new org.json.JSONArray();
+            for (Gone g : history) {
+                a.put(new org.json.JSONObject().put("p", g.pkg).put("t", g.title).put("x", g.text)
+                        .put("at", g.posted).put("rm", g.removed));
+            }
+            c.getSharedPreferences("notif_history", Context.MODE_PRIVATE).edit().putString("list", a.toString()).apply();
+        } catch (Exception ignored) {}
+    }
+
+    private static List<Gone> load(Context c) {
+        List<Gone> out = new ArrayList<>();
+        try {
+            org.json.JSONArray a = new org.json.JSONArray(
+                    c.getSharedPreferences("notif_history", Context.MODE_PRIVATE).getString("list", "[]"));
+            for (int i = 0; i < a.length(); i++) {
+                org.json.JSONObject o = a.getJSONObject(i);
+                Gone g = new Gone();
+                g.pkg = o.optString("p");
+                g.title = o.optString("t");
+                g.text = o.optString("x");
+                g.posted = o.optLong("at");
+                g.removed = o.optLong("rm");
+                out.add(g);
+            }
+        } catch (Exception ignored) {}
+        return out;
+    }
 
     static void dismiss(String key) {
         NotifService s = running;

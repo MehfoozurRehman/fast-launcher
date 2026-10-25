@@ -51,6 +51,8 @@ final class SearchExtras extends LinearLayout {
     // Built once and reused while typing: a keystroke only changes text and visibility, and the
     // contact rows are rebuilt only when the set of matching contacts actually changes.
     private final View mathsRow, webRow, hiddenRow;
+    private final LinearLayout settingsBox;
+    private String shownSettings = "";
     private final TextView mathsTitle, webTitle, hiddenTitle;
     private boolean hiddenShown;
     private final LinearLayout contactBox;
@@ -68,6 +70,13 @@ final class SearchExtras extends LinearLayout {
         webRow = row(c, glyph(c, Ui.G_SEARCH), "", null, this::web);
         webTitle = (TextView) webRow.getTag();
         addView(hiddenRow, rowLp());
+        settingsBox = new LinearLayout(c);
+        settingsBox.setOrientation(VERTICAL);
+        settingsBox.setLayoutTransition(Ui.rows());
+        // look up which settings screens exist once, off the main thread, before the first keystroke
+        final Context app = c.getApplicationContext();
+        worker.execute(() -> Setting.all(app));
+        addView(settingsBox, new LinearLayout.LayoutParams(-1, -2));
         addView(mathsRow, rowLp());
         addView(contactBox, new LinearLayout.LayoutParams(-1, -2));
         addView(webRow, rowLp());
@@ -102,6 +111,7 @@ final class SearchExtras extends LinearLayout {
         hiddenShown = hidden > 0;
         if (hiddenShown) hiddenTitle.setText(hidden == 1 ? "1 hidden app" : hidden + " hidden apps");
         setVis(hiddenRow, hiddenShown);
+        showSettings(Setting.match(getContext(), q));
         webTitle.setText("Search the web for \u201C" + q + "\u201D");
         setVis(this, true);
         boolean lookup = q.length() >= 2
@@ -147,7 +157,7 @@ final class SearchExtras extends LinearLayout {
 
     /** Fixed-height rows, so the height is arithmetic: no measure pass while typing. */
     private void reportHeight() {
-        int rows = 1 + (maths != null ? 1 : 0) + (hiddenShown ? 1 : 0) + contactBox.getChildCount();
+        int rows = 1 + (maths != null ? 1 : 0) + (hiddenShown ? 1 : 0) + contactBox.getChildCount() + settingsBox.getChildCount();
         host.onExtrasHeight(rows * Ui.dpi(getContext(), 52 + 6) - Ui.dpi(getContext(), 6));
     }
 
@@ -187,6 +197,85 @@ final class SearchExtras extends LinearLayout {
         int p = Ui.dpi(c, 9);
         g.setPadding(p, p, p, p);
         return g;
+    }
+
+    private void showSettings(List<Setting> found) {
+        StringBuilder key = new StringBuilder();
+        for (Setting st : found) key.append(st.title).append(',');
+        if (key.toString().equals(shownSettings)) return;
+        shownSettings = key.toString();
+        settingsBox.removeAllViews();
+        Context c = getContext();
+        for (final Setting st : found) {
+            settingsBox.addView(row(c, panelIcon(c, PanelIcons.GEAR), st.title, "Settings", v -> host.start(st.intent(), v)), rowLp());
+        }
+    }
+
+    /**
+     * Settings screens you can jump to from search ("wifi", "battery", "display"...). Each is
+     * listed only if the phone actually has that screen.
+     */
+    static final class Setting {
+        final String title, action;
+        final String[] words;
+
+        Setting(String title, String action, String... words) { this.title = title; this.action = action; this.words = words; }
+
+        Intent intent() { return new Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); }
+
+        private static List<Setting> all;
+
+        private static List<Setting> all(Context c) {
+            if (all != null) return all;
+            Setting[] list = {
+                new Setting("Wi-Fi", android.provider.Settings.ACTION_WIFI_SETTINGS, "wifi", "wi-fi", "wireless", "internet", "network"),
+                new Setting("Bluetooth", android.provider.Settings.ACTION_BLUETOOTH_SETTINGS, "bluetooth", "earbuds", "headphones", "pair"),
+                new Setting("Mobile network", android.provider.Settings.ACTION_DATA_ROAMING_SETTINGS, "mobile", "data", "sim", "roaming", "network", "cellular"),
+                new Setting("Data usage", android.provider.Settings.ACTION_DATA_USAGE_SETTINGS, "data usage", "usage", "data"),
+                new Setting("Hotspot & tethering", android.provider.Settings.ACTION_WIRELESS_SETTINGS, "hotspot", "tethering", "more connections"),
+                new Setting("Aeroplane mode", android.provider.Settings.ACTION_AIRPLANE_MODE_SETTINGS, "aeroplane", "airplane", "flight"),
+                new Setting("VPN", android.provider.Settings.ACTION_VPN_SETTINGS, "vpn"),
+                new Setting("NFC", android.provider.Settings.ACTION_NFC_SETTINGS, "nfc", "tap to pay"),
+                new Setting("Display & brightness", android.provider.Settings.ACTION_DISPLAY_SETTINGS, "display", "brightness", "dark mode", "screen", "font", "eye comfort", "refresh rate"),
+                new Setting("Sounds & vibration", android.provider.Settings.ACTION_SOUND_SETTINGS, "sound", "volume", "ringtone", "vibration", "vibrate"),
+                new Setting("Notifications", "android.settings.NOTIFICATION_SETTINGS", "notifications", "notification"),
+                new Setting("Do not disturb", "android.settings.ZEN_MODE_SETTINGS", "do not disturb", "dnd", "silent", "focus"),
+                new Setting("Battery", Intent.ACTION_POWER_USAGE_SUMMARY, "battery", "power", "charging"),
+                new Setting("Battery saver", android.provider.Settings.ACTION_BATTERY_SAVER_SETTINGS, "battery saver", "power saving", "saver"),
+                new Setting("Storage", android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS, "storage", "space", "memory"),
+                new Setting("Apps", android.provider.Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS, "apps", "applications", "uninstall"),
+                new Setting("Default apps", android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS, "default apps", "default", "home app", "browser"),
+                new Setting("Location", android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS, "location", "gps"),
+                new Setting("Security", android.provider.Settings.ACTION_SECURITY_SETTINGS, "security", "lock", "fingerprint", "face", "password", "pin", "biometrics"),
+                new Setting("Privacy", android.provider.Settings.ACTION_PRIVACY_SETTINGS, "privacy", "permissions"),
+                new Setting("Accessibility", android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS, "accessibility"),
+                new Setting("Accounts", android.provider.Settings.ACTION_SYNC_SETTINGS, "accounts", "sync", "google account"),
+                new Setting("Date & time", android.provider.Settings.ACTION_DATE_SETTINGS, "date", "time", "clock", "timezone"),
+                new Setting("Language & keyboard", android.provider.Settings.ACTION_LOCALE_SETTINGS, "language", "keyboard", "input"),
+                new Setting("Developer options", android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS, "developer", "usb debugging", "debugging"),
+                new Setting("About phone", android.provider.Settings.ACTION_DEVICE_INFO_SETTINGS, "about", "phone info", "android version", "model"),
+                new Setting("Cast", android.provider.Settings.ACTION_CAST_SETTINGS, "cast", "screen mirroring", "mirror"),
+            };
+            List<Setting> ok = new ArrayList<>();
+            PackageManager pm = c.getPackageManager();
+            for (Setting st : list) if (st.intent().resolveActivity(pm) != null) ok.add(st);
+            all = ok;
+            return all;
+        }
+
+        /** Up to two screens whose name or a keyword starts with what was typed (2+ letters). */
+        static List<Setting> match(Context c, String q) {
+            List<Setting> out = new ArrayList<>();
+            String t = q.trim().toLowerCase(Locale.ROOT);
+            if (t.length() < 2) return out;
+            for (Setting st : all(c)) {
+                boolean hit = st.title.toLowerCase(Locale.ROOT).startsWith(t);
+                for (String w : st.words) if (w.startsWith(t) || (t.length() >= 4 && w.contains(t))) hit = true;
+                if (hit) out.add(st);
+                if (out.size() == 2) break;
+            }
+            return out;
+        }
     }
 
     private View panelIcon(Context c, int type) {

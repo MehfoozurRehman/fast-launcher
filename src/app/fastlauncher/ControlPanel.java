@@ -72,6 +72,11 @@ final class ControlPanel extends FrameLayout {
     private final TextView notifCount, notifEmpty, clearAll;
     private final ScrollView notifScroll;
     private boolean notifsDirty = true;
+    private TextView historyButton;
+    private LinearLayout historyList;
+    private boolean historyOpen;
+    /** Apps whose grouped notifications are expanded (reset each time the panel opens). */
+    private final java.util.Set<String> expanded = new java.util.HashSet<>();
     static final int CONTROLS = 0, NOTIFS = 1, BT = 2;
     private int page = CONTROLS;
     private final ScrollView btScroll;
@@ -253,6 +258,17 @@ final class ControlPanel extends FrameLayout {
         notifEmpty = Ui.text(c, "No notifications", 14, Ui.FG2, false);
         notifEmpty.setGravity(Gravity.CENTER);
         npage.addView(notifEmpty, Ui.lp(-1, Ui.dpi(c, 120)));
+        // recently dismissed: a quiet button that opens the last day's dismissed notifications
+        historyButton = Ui.text(c, "", 13.5f, Ui.FG2, true);
+        historyButton.setGravity(Gravity.CENTER);
+        historyButton.setBackground(Ui.round(TILE, Ui.dp(c, 20)));
+        historyButton.setClickable(true);
+        Ui.pressable(historyButton);
+        historyButton.setOnClickListener(v -> { historyOpen = !historyOpen; buildHistory(); });
+        npage.addView(historyButton, Ui.lp(-1, Ui.dpi(c, 40), Ui.dpi(c, 10)));
+        historyList = new LinearLayout(c);
+        historyList.setOrientation(LinearLayout.VERTICAL);
+        npage.addView(historyList, Ui.lp(-1, -2, Ui.dpi(c, 8)));
         notifScroll.addView(npage);
         notifScroll.setVisibility(GONE);
         pager.addView(notifScroll, new LayoutParams(-1, -2));
@@ -354,6 +370,19 @@ final class ControlPanel extends FrameLayout {
         mcol.addView(times, Ui.lp(-1, -2));
         mediaFull.setClickable(true);
         mediaFull.setOnClickListener(v -> openPlayer());
+        // where the sound goes (this phone, earbuds, a speaker): Android's own output picker
+        PanelIcons output = new PanelIcons(c, PanelIcons.SPEAKER, Color.WHITE);
+        int outPad = Ui.dpi(c, 7);
+        output.setPadding(outPad, outPad, outPad, outPad);
+        output.setBackground(Ui.round(0x40FFFFFF, Ui.dp(c, 16)));
+        output.setClickable(true);
+        Ui.pressable(output);
+        output.setOnClickListener(v -> pickOutput());
+        LayoutParams olp = new LayoutParams(Ui.dpi(c, 32), Ui.dpi(c, 32), Gravity.TOP | Gravity.END);
+        olp.topMargin = olp.rightMargin = Ui.dpi(c, 10);
+        mediaFull.addView(output, olp);
+        mediaTitle.setPadding(0, 0, Ui.dpi(c, 34), 0);
+        mediaArtist.setPadding(0, 0, Ui.dpi(c, 34), 0);
         LinearLayout controls = new LinearLayout(c);
         controls.setGravity(Gravity.CENTER);
         controls.addView(mediaButton(c, PanelIcons.PREV, false, () -> { if (controller != null) controller.getTransportControls().skipToPrevious(); }),
@@ -526,6 +555,8 @@ final class ControlPanel extends FrameLayout {
     void refresh(boolean notifications) {
         final Context c = getContext();
         notifsDirty = true; // "5m ago" and friends are rebuilt fresh on every open
+        expanded.clear();
+        historyOpen = false;
         scroll.scrollTo(0, 0);
         showPage(notifications ? NOTIFS : CONTROLS);
         showNotifCount();
@@ -1149,17 +1180,137 @@ final class ControlPanel extends FrameLayout {
         if (page == NOTIFS && progress > 0f) android.transition.TransitionManager.beginDelayedTransition(notifList, Ui.motion());
         notifList.removeAllViews();
         List<android.service.notification.StatusBarNotification> all = NotifService.list;
-        int shown = Math.min(all.size(), 40);
-        for (int i = 0; i < shown; i++) {
-            View row = notifRow(all.get(i));
-            if (row != null) notifList.addView(row, Ui.lp(-1, -2, i == 0 ? 0 : Ui.dpi(getContext(), 8)));
+        // ongoing ones stay single; the rest are gathered per app, in order of each app's newest
+        java.util.LinkedHashMap<String, List<android.service.notification.StatusBarNotification>> byApp = new java.util.LinkedHashMap<>();
+        List<Object> order = new java.util.ArrayList<>();
+        for (int i = 0; i < Math.min(all.size(), 60); i++) {
+            android.service.notification.StatusBarNotification sb = all.get(i);
+            if ((sb.getNotification().flags & android.app.Notification.FLAG_ONGOING_EVENT) != 0) { order.add(sb); continue; }
+            List<android.service.notification.StatusBarNotification> g = byApp.get(sb.getPackageName());
+            if (g == null) {
+                g = new java.util.ArrayList<>();
+                byApp.put(sb.getPackageName(), g);
+                order.add(g);
+            }
+            g.add(sb);
+        }
+        for (Object o : order) {
+            View v;
+            if (o instanceof android.service.notification.StatusBarNotification) v = notifRow((android.service.notification.StatusBarNotification) o, false);
+            else {
+                @SuppressWarnings("unchecked") List<android.service.notification.StatusBarNotification> g = (List<android.service.notification.StatusBarNotification>) o;
+                v = g.size() == 1 ? notifRow(g.get(0), false) : groupCard(g);
+            }
+            if (v != null) notifList.addView(v, Ui.lp(-1, -2, notifList.getChildCount() == 0 ? 0 : Ui.dpi(getContext(), 8)));
         }
         boolean any = notifList.getChildCount() > 0;
         notifEmpty.setVisibility(any ? GONE : VISIBLE);
         clearAll.setVisibility(any ? VISIBLE : INVISIBLE);
+        buildHistory();
     }
 
-    private View notifRow(final android.service.notification.StatusBarNotification s) {
+    /**
+     * Several notifications from one app: one card showing the newest, with "N more" to expand
+     * the rest in place and Clear to dismiss the whole app's lot.
+     */
+    private View groupCard(final List<android.service.notification.StatusBarNotification> g) {
+        final Context c = getContext();
+        final String pkg = g.get(0).getPackageName();
+        final boolean open = expanded.contains(pkg);
+        LinearLayout card = new LinearLayout(c);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(Ui.round(TILE, Ui.dp(c, 22)));
+        int shown = open ? g.size() : 1;
+        for (int i = 0; i < shown; i++) {
+            View row = notifRow(g.get(i), true);
+            if (row == null) continue;
+            if (card.getChildCount() > 0) {
+                View line = new View(c);
+                line.setBackgroundColor(Ui.dark ? 0x14FFFFFF : 0x14000000);
+                LinearLayout.LayoutParams lp = Ui.lp(-1, Math.max(1, Ui.dpi(c, 1)));
+                lp.leftMargin = Ui.dpi(c, 66);
+                lp.rightMargin = Ui.dpi(c, 14);
+                card.addView(line, lp);
+            }
+            card.addView(row, Ui.lp(-1, -2));
+        }
+        LinearLayout bar = new LinearLayout(c);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(Ui.dpi(c, 66), 0, Ui.dpi(c, 8), Ui.dpi(c, 8));
+        TextView more = Ui.text(c, open ? "Show less" : (g.size() - 1) + " more from " + appName(pkg), 13, Ui.ACCENT, true);
+        more.setTypeface(Ui.font(c, 600));
+        more.setSingleLine(true);
+        more.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        more.setPadding(0, Ui.dpi(c, 8), 0, Ui.dpi(c, 8));
+        more.setClickable(true);
+        Ui.pressable(more);
+        more.setOnClickListener(v -> {
+            if (!expanded.remove(pkg)) expanded.add(pkg);
+            buildNotifs();
+        });
+        bar.addView(more, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView clear = Ui.text(c, "Clear", 13, Ui.FG2, true);
+        clear.setGravity(Gravity.CENTER);
+        clear.setPadding(Ui.dpi(c, 14), Ui.dpi(c, 8), Ui.dpi(c, 14), Ui.dpi(c, 8));
+        clear.setClickable(true);
+        Ui.pressable(clear);
+        clear.setOnClickListener(v -> {
+            for (android.service.notification.StatusBarNotification sb : g) {
+                if ((sb.getNotification().flags & android.app.Notification.FLAG_NO_CLEAR) == 0) NotifService.dismiss(sb.getKey());
+            }
+            expanded.remove(pkg);
+        });
+        bar.addView(clear);
+        card.addView(bar, Ui.lp(-1, -2));
+        return card;
+    }
+
+    /** "Recently dismissed (n)": the last day's dismissed notifications, tap one to open it. */
+    private void buildHistory() {
+        final Context c = getContext();
+        List<NotifService.Gone> h = NotifService.history(c);
+        historyButton.setVisibility(h.isEmpty() ? GONE : VISIBLE);
+        historyButton.setText(historyOpen ? "Hide recently dismissed" : "Recently dismissed (" + h.size() + ")");
+        historyList.removeAllViews();
+        if (!historyOpen || h.isEmpty()) return;
+        for (final NotifService.Gone g : h) {
+            LinearLayout row = new LinearLayout(c);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setBackground(Ui.round(TILE, Ui.dp(c, 20)));
+            int p = Ui.dpi(c, 12);
+            row.setPadding(p, Ui.dpi(c, 10), p, Ui.dpi(c, 10));
+            row.setAlpha(0.8f);
+            ImageView icon = new ImageView(c);
+            icon.setImageDrawable(appIcon(g.pkg));
+            row.addView(icon, Ui.lp(Ui.dpi(c, 32), Ui.dpi(c, 32)));
+            LinearLayout col = new LinearLayout(c);
+            col.setOrientation(LinearLayout.VERTICAL);
+            col.setPadding(Ui.dpi(c, 12), 0, 0, 0);
+            TextView meta = Ui.text(c, appName(g.pkg) + "  \u00b7  " + ago(g.posted), 11, Ui.FG2, false);
+            meta.setSingleLine(true);
+            col.addView(meta);
+            String line = g.title.isEmpty() ? g.text : g.text.isEmpty() ? g.title : g.title + ": " + g.text;
+            TextView t = Ui.text(c, line.trim(), 13, Ui.FG, false);
+            t.setMaxLines(2);
+            t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            col.addView(t, Ui.lp(-1, -2, Ui.dpi(c, 2)));
+            row.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
+            row.setClickable(true);
+            Ui.pressable(row);
+            row.setOnClickListener(v -> { if (send(g.open)) close(); else openApp(g.pkg); });
+            historyList.addView(row, Ui.lp(-1, -2, historyList.getChildCount() == 0 ? 0 : Ui.dpi(c, 6)));
+        }
+        TextView clear = Ui.text(c, "Clear history", 12.5f, Ui.FG2, false);
+        clear.setGravity(Gravity.CENTER);
+        clear.setPadding(0, Ui.dpi(c, 10), 0, Ui.dpi(c, 4));
+        clear.setClickable(true);
+        clear.setOnClickListener(v -> { NotifService.clearHistory(getContext()); historyOpen = false; buildHistory(); });
+        historyList.addView(clear, Ui.lp(-1, -2));
+    }
+
+    private View notifRow(final android.service.notification.StatusBarNotification s) { return notifRow(s, false); }
+
+    private View notifRow(final android.service.notification.StatusBarNotification s, boolean inGroup) {
         final Context c = getContext();
         final android.app.Notification n = s.getNotification();
         android.os.Bundle x = n.extras;
@@ -1173,7 +1324,7 @@ final class ControlPanel extends FrameLayout {
             NotifService.dismiss(s.getKey());
         }, () -> openNotif(s));
         row.setGravity(Gravity.TOP);
-        row.setBackground(Ui.round(TILE, Ui.dp(c, 22)));
+        if (!inGroup) row.setBackground(Ui.round(TILE, Ui.dp(c, 22))); // in a group the card draws it
         int p = Ui.dpi(c, 14);
         row.setPadding(p, p, p, p);
 
@@ -1349,6 +1500,22 @@ final class ControlPanel extends FrameLayout {
         if (controller == null) return;
         if (send(controller.getSessionActivity())) { close(); return; }
         openApp(controller.getPackageName());
+    }
+
+    /** The system's media output dialog for the playing app (falls back to Bluetooth settings). */
+    private void pickOutput() {
+        final String pkg = controller != null ? controller.getPackageName() : null;
+        closeThen(150, () -> {
+            try {
+                Intent i = new Intent("com.android.systemui.action.LAUNCH_MEDIA_OUTPUT_DIALOG")
+                        .setComponent(new ComponentName("com.android.systemui", "com.android.systemui.media.dialog.MediaOutputDialogReceiver"));
+                if (pkg != null) i.putExtra("package_name", pkg);
+                getContext().sendBroadcast(i);
+            } catch (Exception e) {
+                Diag.log("media output: " + e);
+                host.launch(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
+            }
+        });
     }
 
     private void seekTo(float fraction) {

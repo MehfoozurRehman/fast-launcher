@@ -8,7 +8,8 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   alarms / calendar / weather app), two-row dock with notification badges.
 - **Drawer**: swipe up over a blurred copy of the wallpaper. It follows your finger and the rows cascade in,
   so a slow drag shows the transition and a flick finishes fast. It can be caught mid-animation.
-  Search finds apps, contacts and sums (`12*8+4`), with a web search below; Enter launches the top hit.
+  Search finds apps, contacts, settings screens ("wifi", "battery") and sums (`12*8+4`), with a web search
+  below; Enter launches the top hit.
 - **Wallpaper swaps** cross-fade: the launcher shows the new image itself while Android rebinds its
   wallpaper window, hiding the black blink.
 - **Icons**: pebbles. Each app sits on an organic blob plate (white in light mode, near-black in dark mode), with its own artwork set into an
@@ -22,7 +23,8 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
 - **Swipe down on home** opens the notifications page; **double-tap** empty space to lock the phone.
 - **Under the date**: the next alarm and calendar event when they fall within the coming day.
 - **Notifications, from any app**: swipe down from the left side of the status bar. Tap one to open it,
-  swipe it right to dismiss, or Clear all. Swipe sideways to move between notifications and controls;
+  swipe it right to dismiss, or Clear all. Several from one app share a card ("3 more from WhatsApp",
+  tap to expand, Clear for the lot); **Recently dismissed** brings back the last day's dismissed ones. Swipe sideways to move between notifications and controls;
   a swipe from the screen edge (the back gesture) closes the panel.
   Ongoing ones (USB mode, charging, downloads with their progress) are listed first and can be tapped
   but not dismissed. Notification buttons work (Reply opens a reply field in the card, Mark as read
@@ -30,7 +32,8 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   phone's own notifications or control centre (whichever page you're on), just that once. An incoming call closes the panel; in landscape the phone's own pull-down is used.
 - **Control panel, from any app**: swipe down from the right half of the status bar (needs the
   "Fast Launcher controls" accessibility service, which reads no screen content). Wi-Fi, Mobile data,
-  Bluetooth and Torch tiles; a now-playing card (album art, live progress you can drag to seek, controls; tap it to open the player) beside tall brightness and volume sliders that show the real level; and a
+  Bluetooth and Torch tiles; a now-playing card (album art, live progress you can drag to seek, controls, a button to choose where the
+  sound plays; tap it to open the player) beside tall brightness and volume sliders that show the real level; and a
   grid with Hotspot, Auto-rotate, Aeroplane, Location, Dark mode, Do not disturb, Sound mode, Eye
   comfort, Battery saver, Screenshot, Screen record, Cast, Calculator, Recorder, Lock and Power.
   Controls Android lets apps change are switched in place; the rest open their exact system page.
