@@ -26,8 +26,8 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   a swipe from the screen edge (the back gesture) closes the panel.
   Ongoing ones (USB mode, charging, downloads with their progress) are listed first and can be tapped
   but not dismissed. Notification buttons work (Reply opens a reply field in the card, Mark as read
-  and the like act without closing the panel). **System notifications** at the bottom opens the
-  phone's own shade. An incoming call closes the panel; in landscape the phone's own pull-down is used.
+  and the like act without closing the panel). **Original** in the panel's top bar opens the
+  phone's own notifications or control centre (whichever page you're on), just that once. An incoming call closes the panel; in landscape the phone's own pull-down is used.
 - **Control panel, from any app**: swipe down from the right half of the status bar (needs the
   "Fast Launcher controls" accessibility service, which reads no screen content). Wi-Fi, Mobile data,
   Bluetooth and Torch tiles; a now-playing card (album art, live progress you can drag to seek, controls; tap it to open the player) beside tall brightness and volume sliders that show the real level; and a

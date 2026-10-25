@@ -188,6 +188,23 @@ final class ControlPanel extends FrameLayout {
         notifButton.setOnClickListener(v -> showPage(page == NOTIFS ? CONTROLS : NOTIFS));
         LinearLayout.LayoutParams nbp = Ui.lp(-2, Ui.dpi(c, 44));
         nbp.rightMargin = Ui.dpi(c, 8);
+        // a way out to the phone's own panel, for this one time (the next pull opens ours again):
+        // the notifications page leads to its notifications, the controls to its control centre
+        TextView original = Ui.text(c, "Original", 13.5f, Ui.FG, true);
+        original.setTypeface(Ui.font(c, 600));
+        original.setGravity(Gravity.CENTER);
+        original.setPadding(Ui.dpi(c, 16), 0, Ui.dpi(c, 16), 0);
+        original.setBackground(Ui.round(TILE, Ui.dp(c, 22)));
+        original.setClickable(true);
+        Ui.pressable(original);
+        original.setOnClickListener(v -> {
+            final int action = page == NOTIFS ? AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS
+                    : AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS;
+            closeThen(200, () -> host.globalAction(action));
+        });
+        LinearLayout.LayoutParams op = Ui.lp(-2, Ui.dpi(c, 44));
+        op.rightMargin = Ui.dpi(c, 8);
+        head.addView(original, op);
         head.addView(circleButton(c, PanelIcons.GEAR, () -> open(new Intent(Settings.ACTION_SETTINGS))));
         card.addView(head, Ui.lp(-1, -2));
 
@@ -236,10 +253,6 @@ final class ControlPanel extends FrameLayout {
         notifEmpty = Ui.text(c, "No notifications", 14, Ui.FG2, false);
         notifEmpty.setGravity(Gravity.CENTER);
         npage.addView(notifEmpty, Ui.lp(-1, Ui.dpi(c, 120)));
-        // always a way into the system's own shade (anything this page can't show or do)
-        npage.addView(pill(c, "System notifications", () -> closeThen(200,
-                () -> host.globalAction(AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS))),
-                Ui.lp(-1, Ui.dpi(c, 44), Ui.dpi(c, 10)));
         notifScroll.addView(npage);
         notifScroll.setVisibility(GONE);
         pager.addView(notifScroll, new LayoutParams(-1, -2));
