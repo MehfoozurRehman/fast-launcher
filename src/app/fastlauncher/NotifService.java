@@ -31,7 +31,7 @@ public class NotifService extends NotificationListenerService {
 
     private final Handler main = new Handler(Looper.getMainLooper());
 
-    @Override public void onListenerConnected() { running = this; refresh(); }
+    @Override public void onListenerConnected() { Diag.install(this); running = this; refresh(); }
     @Override public void onListenerDisconnected() { if (running == this) running = null; }
     @Override public void onNotificationPosted(StatusBarNotification sbn) { refresh(); }
     @Override public void onNotificationRemoved(StatusBarNotification sbn) { refresh(); }

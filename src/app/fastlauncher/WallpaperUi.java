@@ -3,6 +3,7 @@ package app.fastlauncher;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
@@ -252,8 +253,36 @@ final class WallpaperUi {
             toggle.setListener(v -> Walls.setLockToo(getContext(), v == 1));
             lockRow.addView(toggle);
 
+            // --- a quiet way to send a report from the phone itself (no computer needed)
+            TextView report = Ui.text(c, "Something not working?  Report a problem", 13, Ui.FG2, false);
+            report.setGravity(Gravity.CENTER);
+            report.setPadding(0, Ui.dpi(c, 12), 0, Ui.dpi(c, 2));
+            report.setClickable(true);
+            Ui.pressable(report);
+            report.setOnClickListener(v -> shareReport());
+            card.addView(report, Ui.lp(-1, -2, Ui.dpi(c, 6)));
+
             refreshNow();
             refreshNext();
+        }
+
+        /** Version, what's switched on and the recent log, as text to send anywhere (WhatsApp, email). */
+        private void shareReport() {
+            final Context c = getContext();
+            host.snack("Preparing the report…");
+            host.wallWorker().execute(() -> {
+                final String text = Diag.report(c);
+                host.runOnUi(() -> {
+                    Intent send = new Intent(Intent.ACTION_SEND).setType("text/plain")
+                            .putExtra(Intent.EXTRA_SUBJECT, "Fast Launcher report")
+                            .putExtra(Intent.EXTRA_TEXT, text);
+                    try {
+                        c.startActivity(Intent.createChooser(send, "Send the report").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    } catch (Exception e) {
+                        host.snack("Couldn't open sharing");
+                    }
+                });
+            });
         }
 
         private Thumbs nowThumbs;

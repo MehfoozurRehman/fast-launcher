@@ -41,6 +41,7 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
     }
 
     @Override protected void onServiceConnected() {
+        Diag.install(this);
         running = this;
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
@@ -155,17 +156,17 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
                             }
                         }
                     } catch (Exception e) {
-                        android.util.Log.w("FastLauncher", "panel blur: " + e);
+                        Diag.log("panel blur: " + e);
                     }
                     final android.graphics.Bitmap b = blurred;
                     if (b != null) main.post(() -> { if (panel != null) panel.setBackdrop(b); });
                 }
                 @Override public void onFailure(int code) {
-                    android.util.Log.w("FastLauncher", "panel capture failed: " + code);
+                    Diag.log("panel capture failed: " + code);
                 }
             });
         } catch (Exception e) {
-            android.util.Log.w("FastLauncher", "panel capture: " + e);
+            Diag.log("panel capture: " + e);
         }
     }
 

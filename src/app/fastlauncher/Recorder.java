@@ -136,7 +136,7 @@ final class Recorder {
                 recording = true;
                 changed();
             } catch (Exception e) {
-                android.util.Log.w("FastLauncher", "recording failed: " + e);
+                Diag.log("recording failed: " + e);
                 stop();
             }
         }

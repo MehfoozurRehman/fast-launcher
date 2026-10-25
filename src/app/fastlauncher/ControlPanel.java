@@ -482,7 +482,7 @@ final class ControlPanel extends FrameLayout {
     }
 
     private static void safe(Runnable r) {
-        try { r.run(); } catch (Throwable t) { android.util.Log.w("FastLauncher", "panel: " + t); }
+        try { r.run(); } catch (Throwable t) { Diag.log("panel: " + t); }
     }
 
     // ================================================================ state

@@ -112,6 +112,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
+        Diag.install(this);
         Ui.theme(this);
         builtDark = Ui.dark;
         dp = getResources().getDisplayMetrics().density;
@@ -169,6 +170,17 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private final BroadcastReceiver debugReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
             String what = i.getStringExtra("debug");
+            if ("report".equals(what)) {
+                // the same report as "Report a problem", as a file adb can pull:
+                // /sdcard/Android/data/app.fastlauncher/files/report.txt
+                final Context app = getApplicationContext();
+                wallWorker.execute(() -> {
+                    try (java.io.FileWriter w = new java.io.FileWriter(new java.io.File(app.getExternalFilesDir(null), "report.txt"))) {
+                        w.write(Diag.report(app));
+                    } catch (Exception e) { Diag.log("report file: " + e); }
+                });
+                return;
+            }
             if (what != null) debugWallpaper(what);
         }
     };
@@ -240,7 +252,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 }
                 android.util.Log.i("FastLauncher", "debug " + what + " done");
             } catch (Exception e) {
-                android.util.Log.w("FastLauncher", "debug " + what + " failed " + e);
+                Diag.log("debug " + what + " failed " + e);
             }
         });
     }
@@ -258,6 +270,9 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         Ui.theme(this);
         if (builtDark != Ui.dark) { recreate(); return; }
         NotifService.listener = notifChanged;
+        // put the panel's service back if a phone cleaner force-stopped us (Android turns it off)
+        final Context appCtx = getApplicationContext();
+        wallWorker.execute(() -> Diag.repair(appCtx));
         pushBadges();
         clock.removeCallbacks(tick);
         showWeather();
@@ -1013,7 +1028,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             Class.forName("android.app.StatusBarManager").getMethod("expandNotificationsPanel").invoke(sb);
             root.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
         } catch (Throwable t) {
-            android.util.Log.w("FastLauncher", "couldn't open the notification shade: " + t);
+            Diag.log("couldn't open the notification shade: " + t);
         }
     }
 

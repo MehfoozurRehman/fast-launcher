@@ -263,7 +263,7 @@ final class Walls {
                 .setPersisted(true)
                 .build();
         try { js.schedule(ji); } catch (Exception e) {
-            android.util.Log.w("FastLauncher", "couldn't schedule wallpaper job: " + e);
+            Diag.log("couldn't schedule wallpaper job: " + e);
         }
     }
 
