@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="panel_description">Pull down from the right side of the status bar to open the Fast Launcher control panel. Used only to show the panel over other apps, close it with Back, and take screenshots or lock the phone from it. It does not read anything on your screen.</string>
+</resources>
