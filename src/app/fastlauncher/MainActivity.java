@@ -72,17 +72,27 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private Root root;
     private FrameLayout home, drawer;
     private View topScrim;
+    private BlurView blurView, coverView;
+    private LinearLayout dateRow, weatherChip;
+    private Weather.Glyph weatherGlyph;
+    private TextView weatherText;
+    private boolean weatherLoading, coverPending;
     private TextView clock, date, title, snackView;
     private EditText search;
     private Ui.Glyph btnSearch;
     private AppGridView dock, grid;
 
+    /** Survives activity recreation (theme/wallpaper changes), so icons never blink. */
+    private static final List<AppGridView.AppEntry> CACHE = new ArrayList<>();
     private final List<AppGridView.AppEntry> all = new ArrayList<>();
     private List<AppGridView.AppEntry> shown = all;
     private final AppGridView.AppEntry[] dockEntries = new AppGridView.AppEntry[DOCK_SLOTS];
     private List<AppGridView.AppEntry> dockShown = new ArrayList<>();
-    private final ExecutorService iconWorker = Executors.newSingleThreadExecutor();
-    private final ExecutorService wallWorker = Executors.newSingleThreadExecutor();
+    // Process-wide and never shut down: a late callback from an old activity instance
+    // must never hit a dead executor.
+    private static final ExecutorService iconWorker = Executors.newSingleThreadExecutor();
+    private static final ExecutorService wallWorker = Executors.newSingleThreadExecutor();
+    private Object colorsListener;
     private final Handler main = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
     private boolean drawerOpen, searching, brightWall;
@@ -117,15 +127,27 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         f.addDataScheme("package");
         registerReceiver(pkgReceiver, f);
 
+        if (!CACHE.isEmpty()) {
+            all.addAll(CACHE);
+            resolveDock();
+            grid.setItems(all);
+            dock.setItems(dockShown);
+        }
         watchWallpaperColors();
         Walls.init(this);
+        loadBlur();
         loadApps(null);
     }
 
     @Override protected void onDestroy() {
         unregisterReceiver(pkgReceiver);
-        iconWorker.shutdownNow();
-        wallWorker.shutdownNow();
+        if (Build.VERSION.SDK_INT >= 27 && colorsListener != null) {
+            try {
+                WallpaperManager.getInstance(this).removeOnColorsChangedListener(
+                        (WallpaperManager.OnColorsChangedListener) colorsListener);
+            } catch (Exception ignored) {}
+        }
+        loadGen++; // abandon any in-flight icon load for this instance
         super.onDestroy();
     }
 
@@ -138,6 +160,8 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
     @Override protected void onNewIntent(Intent i) {
         super.onNewIntent(i);
+        String debug = i.getStringExtra("debug");
+        if (debug != null) { debugWallpaper(debug); return; }
         if (!Intent.ACTION_MAIN.equals(i.getAction())) return;
         // Home pressed: unwind everything back to the plain home screen.
         closeAllOverlays();
@@ -150,7 +174,32 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         if (!overlays.isEmpty()) { overlays.get(overlays.size() - 1).close(); return; }
         if (placing != null) { cancelPlacing(); return; }
         if (searching) { endSearch(); return; }
-        if (drawerOpen) root.animateTo(0f);
+        if (root.progress > 0f) root.animateTo(0f);
+    }
+
+    /** adb: am start -n app.fastlauncher/.MainActivity --es debug swap|restore */
+    private void debugWallpaper(String what) {
+        final Context app = getApplicationContext();
+        wallWorker.execute(() -> {
+            try {
+                SharedPreferences p = Walls.prefs(app);
+                if ("swap".equals(what)) {
+                    Walls.Wall cur = Walls.current(app);
+                    if (cur != null) p.edit().putString("debugPrev", cur.toJson().toString()).apply();
+                    Walls.next(app, false);
+                } else if ("history".equals(what)) {
+                    android.util.Log.i("FastLauncher", "history " + p.getString("history", ""));
+                } else if (what.startsWith("apply:")) {
+                    Walls.applyChosen(app, Walls.byId(what.substring(6)), null);
+                } else if ("restore".equals(what)) {
+                    String prev = p.getString("debugPrev", null);
+                    if (prev != null) Walls.applyChosen(app, Walls.Wall.fromJson(new org.json.JSONObject(prev)), null);
+                }
+                android.util.Log.i("FastLauncher", "debug " + what + " done");
+            } catch (Exception e) {
+                android.util.Log.w("FastLauncher", "debug " + what + " failed " + e);
+            }
+        });
     }
 
     private final NotifService.Changed notifChanged = this::pushBadges;
@@ -165,7 +214,9 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         NotifService.listener = notifChanged;
         pushBadges();
         clock.removeCallbacks(tick);
+        showWeather();
         tick.run();
+        Walls.cover = cover;
         // Backstop for the scheduled job, which OEM battery managers like to delay.
         if (Walls.due(this) && !Walls.isBusy()) {
             final Context app = getApplicationContext();
@@ -175,6 +226,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
     @Override protected void onPause() {
         if (NotifService.listener == notifChanged) NotifService.listener = null;
+        if (Walls.cover == cover) Walls.cover = null;
         clock.removeCallbacks(tick);
         super.onPause();
     }
@@ -220,6 +272,10 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private int dpi(float v) { return Math.round(v * dp); }
 
     private void buildHome() {
+        coverView = new BlurView(this);
+        coverView.setVisibility(View.INVISIBLE);
+        root.addView(coverView, new FrameLayout.LayoutParams(-1, -1));
+
         home = new FrameLayout(this);
         root.addView(home, new FrameLayout.LayoutParams(-1, -1));
 
@@ -235,11 +291,29 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         clock.setOnClickListener(v -> startSafely(new Intent(AlarmClock.ACTION_SHOW_ALARMS), v));
         Ui.pressable(clock);
 
+        dateRow = new LinearLayout(this);
+        dateRow.setGravity(Gravity.CENTER_VERTICAL);
+        home.addView(dateRow, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
         date = makeDate(this);
-        home.addView(date, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+        dateRow.addView(date);
         date.setOnClickListener(v -> startSafely(
                 Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALENDAR), v));
         Ui.pressable(date);
+
+        weatherChip = new LinearLayout(this);
+        weatherChip.setGravity(Gravity.CENTER_VERTICAL);
+        weatherChip.setPadding(dpi(12), dpi(4), dpi(4), dpi(4));
+        weatherGlyph = new Weather.Glyph(this);
+        weatherChip.addView(weatherGlyph, new LinearLayout.LayoutParams(dpi(26), dpi(26)));
+        weatherText = makeDate(this);
+        LinearLayout.LayoutParams wt = new LinearLayout.LayoutParams(-2, -2);
+        wt.leftMargin = dpi(6);
+        weatherChip.addView(weatherText, wt);
+        weatherChip.setClickable(true);
+        weatherChip.setOnClickListener(v -> onWeatherTap(v));
+        Ui.pressable(weatherChip);
+        weatherChip.setVisibility(View.GONE);
+        dateRow.addView(weatherChip);
 
         dock = makeDock(this);
         dock.setListener(new AppGridView.Listener() {
@@ -260,13 +334,22 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             Calendar c = Calendar.getInstance();
             clock.setText(clockText(c));
             date.setText(dateText(c));
+            if (Weather.stale(MainActivity.this)) refreshWeather();
             long now = System.currentTimeMillis();
             clock.postDelayed(this, 60000 - (now % 60000) + 50);
         }
     };
 
     private void buildDrawer() {
-        drawer = new FrameLayout(this);
+        blurView = new BlurView(this);
+        blurView.setVisibility(View.INVISIBLE);
+        root.addView(blurView, new FrameLayout.LayoutParams(-1, -1));
+
+        // Fading a ViewGroup normally renders it offscreen every frame; ours has no
+        // overlapping children, so let each child take the alpha directly.
+        drawer = new FrameLayout(this) {
+            @Override public boolean hasOverlappingRendering() { return false; }
+        };
         drawer.setBackgroundColor(0x59000000);
         drawer.setVisibility(View.INVISIBLE);
         root.addView(drawer, new FrameLayout.LayoutParams(-1, -1));
@@ -322,9 +405,9 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         FrameLayout.LayoutParams cp = (FrameLayout.LayoutParams) clock.getLayoutParams();
         cp.topMargin = dpi(CLOCK_TOP_DP);
         clock.setLayoutParams(cp);
-        FrameLayout.LayoutParams dpm = (FrameLayout.LayoutParams) date.getLayoutParams();
-        dpm.topMargin = dpi(DATE_TOP_DP);
-        date.setLayoutParams(dpm);
+        FrameLayout.LayoutParams dpm = (FrameLayout.LayoutParams) dateRow.getLayoutParams();
+        dpm.topMargin = dpi(DATE_TOP_DP) - dpi(4); // the chip's vertical padding
+        dateRow.setLayoutParams(dpm);
 
         FrameLayout.LayoutParams dk = (FrameLayout.LayoutParams) dock.getLayoutParams();
         dk.bottomMargin = dockBottomMargin();
@@ -356,9 +439,12 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         if (Build.VERSION.SDK_INT < 27) return;
         WallpaperManager wm = WallpaperManager.getInstance(this);
         try { onWallColors(wm.getWallpaperColors(WallpaperManager.FLAG_SYSTEM)); } catch (Exception ignored) {}
-        wm.addOnColorsChangedListener((colors, which) -> {
+        WallpaperManager.OnColorsChangedListener l = (colors, which) -> {
+            if (isDestroyed()) return;
             if ((which & WallpaperManager.FLAG_SYSTEM) != 0) onWallColors(colors);
-        }, main);
+        };
+        colorsListener = l;
+        wm.addOnColorsChangedListener(l, main);
     }
 
     private void onWallColors(WallpaperColors wc) {
@@ -371,9 +457,139 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             bright = Color.luminance(wallColor) > 0.55f;
         }
         brightWall = bright;
+        if (coverPending) {
+            // the system has the new wallpaper; give it a beat to draw, then drop our copy
+            main.removeCallbacks(fadeCover);
+            main.postDelayed(fadeCover, 450);
+        }
         topScrim.animate().alpha(bright ? 1f : 0f).setDuration(400).start();
-        drawer.setBackgroundColor(bright ? 0x8C000000 : 0x59000000);
+        updateDrawerScrim();
         updateBars();
+        loadBlur();
+    }
+
+    // ================================================================ wallpaper cover
+
+    private final Runnable fadeCover = () -> {
+        coverPending = false;
+        coverView.animate().alpha(0f).setDuration(220).withEndAction(() -> {
+            coverView.setBitmap(null);
+            coverView.setVisibility(View.INVISIBLE);
+        }).start();
+    };
+
+    private final Walls.Cover cover = new Walls.Cover() {
+        @Override public void show(android.graphics.Bitmap next, Runnable ready) {
+            main.post(() -> {
+                if (isDestroyed()) { ready.run(); return; }
+                main.removeCallbacks(fadeCover);
+                coverView.animate().cancel();
+                coverView.setBitmap(next);
+                coverView.setVisibility(View.VISIBLE);
+                coverView.setAlpha(0f);
+                // a soft cross-fade from the old wallpaper to the new one
+                coverView.animate().alpha(1f).setDuration(260).setInterpolator(Ui.STANDARD).withEndAction(ready).start();
+            });
+        }
+
+        @Override public void settle() {
+            main.post(() -> {
+                coverPending = true;
+                main.removeCallbacks(fadeCover);
+                main.postDelayed(fadeCover, 1800); // fallback if no colour callback arrives
+            });
+        }
+    };
+
+    // ================================================================ weather
+
+    private static final int REQ_LOCATION = 7;
+
+    private void showWeather() {
+        if (!Weather.hasPermission(this)) {
+            if (Weather.prefs(this).getBoolean("asked", false)) { weatherChip.setVisibility(View.GONE); return; }
+            weatherGlyph.set(Weather.PARTLY, true);
+            weatherText.setText("Weather");
+            weatherChip.setAlpha(0.75f);
+            weatherChip.setVisibility(View.VISIBLE);
+            return;
+        }
+        weatherChip.setAlpha(1f);
+        Weather.Now n = Weather.cached(this);
+        if (n != null) {
+            weatherGlyph.set(n.kind, n.day);
+            weatherText.setText(n.tempC + "°C");
+            weatherChip.setVisibility(View.VISIBLE);
+        }
+        if (Weather.stale(this)) refreshWeather();
+    }
+
+    private void refreshWeather() {
+        if (weatherLoading || !Weather.hasPermission(this)) return;
+        weatherLoading = true;
+        final Context app = getApplicationContext();
+        Weather.locate(app, wallWorker, loc -> wallWorker.execute(() -> {
+            try {
+                if (loc != null) Weather.fetch(app, loc.getLatitude(), loc.getLongitude());
+            } catch (Exception ignored) {
+                // offline or rate-limited: keep showing the cached reading
+            }
+            main.post(() -> {
+                weatherLoading = false;
+                if (isDestroyed()) return;
+                Weather.Now n = Weather.cached(app);
+                if (n == null) return;
+                weatherGlyph.set(n.kind, n.day);
+                weatherText.setText(n.tempC + "°C");
+                if (weatherChip.getVisibility() != View.VISIBLE) {
+                    weatherChip.setAlpha(0f);
+                    weatherChip.setVisibility(View.VISIBLE);
+                    weatherChip.animate().alpha(1f).setDuration(250).start();
+                }
+            });
+        }));
+    }
+
+    private void onWeatherTap(View v) {
+        if (!Weather.hasPermission(this)) {
+            Weather.prefs(this).edit().putBoolean("asked", true).apply();
+            requestPermissions(new String[]{android.Manifest.permission.ACCESS_COARSE_LOCATION}, REQ_LOCATION);
+            return;
+        }
+        for (String pkg : new String[]{"com.hihonor.android.totemweather", "com.google.android.apps.weather"}) {
+            Intent i = getPackageManager().getLaunchIntentForPackage(pkg);
+            if (i != null) { startSafely(i, v); return; }
+        }
+        startSafely(new Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=weather")), v);
+    }
+
+    @Override public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
+        super.onRequestPermissionsResult(code, perms, results);
+        if (code != REQ_LOCATION) return;
+        if (Weather.hasPermission(this)) {
+            weatherText.setText("…");
+            refreshWeather();
+        } else {
+            weatherChip.animate().alpha(0f).setDuration(200).withEndAction(() -> weatherChip.setVisibility(View.GONE)).start();
+        }
+    }
+
+    /** With a blur behind it the drawer needs only a light tint; without, a stronger scrim. */
+    private void updateDrawerScrim() {
+        boolean blur = blurView.hasBlur();
+        drawer.setBackgroundColor(blur ? (brightWall ? 0x40000000 : 0x1A000000) : (brightWall ? 0x8C000000 : 0x59000000));
+    }
+
+    private void loadBlur() {
+        final Context app = getApplicationContext();
+        wallWorker.execute(() -> {
+            final android.graphics.Bitmap b = Walls.loadBlur(app);
+            main.post(() -> {
+                if (isDestroyed()) return;
+                blurView.setBitmap(b);
+                updateDrawerScrim();
+            });
+        });
     }
 
     /** Dark status icons only on a bright wallpaper with nothing dark on top of it. */
@@ -416,6 +632,8 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 if (gen != loadGen) return;
                 all.clear();
                 all.addAll(list);
+                CACHE.clear();
+                CACHE.addAll(list);
                 resolveDock();
                 if (searching) filter(search.getText().toString()); else { shown = all; grid.setItems(all); }
                 dock.setItems(dockShown);
@@ -502,7 +720,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             opts = ActivityOptions.makeScaleUpAnimation(from, Math.round(c[0] - s / 2f), Math.round(c[1] - s / 2f), s, s).toBundle();
         }
         try { startActivity(i, opts); } catch (Exception ex) { snack("Couldn't open " + e.label); return; }
-        if (drawerOpen) {
+        if (root.progress > 0f) {
             if (searching) endSearch();
             root.postDelayed(() -> root.snapTo(0f), 350);
         }
@@ -752,7 +970,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             card.setAlpha(0f);
             card.setScaleX(0.86f);
             card.setScaleY(0.86f);
-            card.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(220).setInterpolator(Ui.EMPHASIZED).start();
+            card.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(170).setInterpolator(Ui.EMPHASIZED).start();
             dim.animate().alpha(1f).setDuration(180).start();
         }
 
@@ -767,12 +985,12 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     final class Root extends FrameLayout {
         float progress; // 0 closed .. 1 open
         private float downX, downY, startProgress;
-        private boolean dragging, layered, barsDark = true;
+        private boolean dragging, homeLayered, barsDark = true;
         private VelocityTracker vt;
         private ValueAnimator anim;
         private final int slop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
         private final Runnable homeLongPress = () -> {
-            if (dragging || drawerOpen || !overlays.isEmpty()) return;
+            if (dragging || progress > 0f || !overlays.isEmpty()) return;
             performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
             openWallpaper();
         };
@@ -781,18 +999,17 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
         private float travel() { return Math.max(1, getHeight()); }
 
-        // Both halves become GPU layers while they move, so a frame is two quads, not a redraw.
+        // Home is static while it fades, so it rides a GPU layer. The drawer is not layered:
+        // its rows cascade during the transition, and a layer would be redrawn every frame.
         private void beginLayers() {
-            if (layered) return;
-            layered = true;
-            drawer.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            if (homeLayered) return;
+            homeLayered = true;
             home.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         }
 
         private void endLayers() {
-            if (!layered || dragging || (anim != null && anim.isRunning())) return;
-            layered = false;
-            drawer.setLayerType(View.LAYER_TYPE_NONE, null);
+            if (!homeLayered || dragging || (anim != null && anim.isRunning())) return;
+            homeLayered = false;
             home.setLayerType(View.LAYER_TYPE_NONE, null);
         }
 
@@ -800,21 +1017,27 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             progress = Math.max(0f, Math.min(1f, p));
             boolean half = progress >= 0.5f;
             if (half == barsDark) { barsDark = !half; updateBars(); }
+            drawerOpen = half;
+            grid.setReveal(progress);
             if (progress <= 0f) {
                 drawer.setVisibility(View.INVISIBLE);
+                blurView.setVisibility(View.INVISIBLE);
                 home.setAlpha(1f);
                 home.setScaleX(1f);
                 home.setScaleY(1f);
-                drawerOpen = false;
                 return;
             }
             if (drawer.getVisibility() != View.VISIBLE) drawer.setVisibility(View.VISIBLE);
-            drawer.setTranslationY((1f - progress) * travel());
-            home.setAlpha(1f - Math.min(1f, progress * 1.5f));
-            float sc = 1f - 0.07f * progress;
+            if (blurView.hasBlur() && blurView.getVisibility() != View.VISIBLE) blurView.setVisibility(View.VISIBLE);
+            // the sheet travels a third of the screen while the rows cascade in behind it
+            float e = 1f - progress;
+            drawer.setTranslationY(e * travel() * 0.33f);
+            drawer.setAlpha(Math.min(1f, progress * 2.2f));
+            blurView.setAlpha(Math.min(1f, progress * 1.6f));
+            home.setAlpha(1f - Math.min(1f, progress * 1.7f));
+            float sc = 1f - 0.08f * progress;
             home.setScaleX(sc);
             home.setScaleY(sc);
-            drawerOpen = progress >= 1f;
         }
 
         void snapTo(float p) {
@@ -825,15 +1048,16 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
         void animateTo(float target) { animateTo(target, 0f); }
 
+        /** velocity: px/s toward the target. A flick finishes fast; a gentle release eases in. */
         void animateTo(final float target, float velocity) {
             if (anim != null) anim.cancel();
             if (target == 0f && searching) endSearch();
             float dist = Math.abs(target - progress);
             if (dist < 0.002f) { setProgress(target); endLayers(); return; }
-            long dur = Math.round(170 + 190 * dist);
-            if (velocity > 300f) {
-                long byVel = Math.round(dist * travel() / velocity * 1000f * 1.35f);
-                dur = Math.max(170, Math.min(dur, byVel));
+            long dur = Math.round(130 + 170 * dist);
+            if (velocity > 200f) {
+                long byVel = Math.round(dist * travel() * 0.45f / velocity * 1000f * 1.6f);
+                dur = Math.max(110, Math.min(dur, byVel));
             }
             beginLayers();
             anim = ValueAnimator.ofFloat(progress, target);
@@ -846,17 +1070,26 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             anim.start();
         }
 
+        private boolean animating() { return anim != null && anim.isRunning(); }
+
         @Override public boolean onInterceptTouchEvent(MotionEvent ev) {
             if (!overlays.isEmpty()) return false;
             switch (ev.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     downX = ev.getX(); downY = ev.getY();
-                    startProgress = progress;
                     dragging = false;
-                    if (anim != null && anim.isRunning()) anim.cancel();
                     if (vt != null) vt.recycle();
                     vt = VelocityTracker.obtain();
                     vt.addMovement(ev);
+                    // Catch the drawer mid-flight: grab it where it is and follow the finger.
+                    if (animating()) {
+                        anim.cancel();
+                        startProgress = progress;
+                        dragging = true;
+                        beginLayers();
+                        return true;
+                    }
+                    startProgress = progress;
                     break;
                 case MotionEvent.ACTION_MOVE:
                     if (vt != null) vt.addMovement(ev);
@@ -869,19 +1102,25 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         private boolean maybeStartDrag(MotionEvent ev) {
             if (placing != null) return false;
             float dy = ev.getY() - downY, dx = ev.getX() - downX;
-            if (Math.abs(dy) > slop && Math.abs(dy) > Math.abs(dx) * 1.2f) {
-                boolean opening = !drawerOpen && dy < 0;
-                boolean closing = drawerOpen && dy > 0 && grid.atTop() && !searching;
+            if (Math.abs(dy) > slop && Math.abs(dy) > Math.abs(dx)) {
+                boolean opening = progress < 0.5f && dy < 0;
+                boolean closing = progress >= 0.5f && dy > 0 && grid.atTop() && !searching;
                 if (opening || closing) {
                     dragging = true;
                     removeCallbacks(homeLongPress);
-                    downY = ev.getY();
+                    // start exactly where the finger is: no jump of `slop` pixels
+                    downY = ev.getY() - Math.signum(dy) * slop * 0.5f;
                     startProgress = progress;
                     beginLayers();
                     return true;
                 }
             }
             return false;
+        }
+
+        private float distanceFor(float dy) {
+            // 1:1 with the finger over 45% of the screen: quick to complete, precise when slow
+            return dy / (travel() * 0.45f);
         }
 
         @Override public boolean onTouchEvent(MotionEvent ev) {
@@ -891,16 +1130,15 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             switch (ev.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     downX = ev.getX(); downY = ev.getY(); startProgress = progress;
-                    if (anim != null && anim.isRunning()) anim.cancel();
+                    if (animating()) { anim.cancel(); dragging = true; beginLayers(); return true; }
                     if (placing != null) { cancelPlacing(); return true; }
-                    if (!drawerOpen && progress == 0f)
-                        postDelayed(homeLongPress, ViewConfiguration.getLongPressTimeout() + 80);
+                    if (progress == 0f) postDelayed(homeLongPress, ViewConfiguration.getLongPressTimeout() + 80);
                     return true;
                 case MotionEvent.ACTION_MOVE:
                     if (!dragging && (Math.abs(ev.getY() - downY) > slop || Math.abs(ev.getX() - downX) > slop))
                         removeCallbacks(homeLongPress);
                     if (!dragging) maybeStartDrag(ev);
-                    if (dragging) setProgress(startProgress + (downY - ev.getY()) / travel());
+                    if (dragging) setProgress(startProgress + distanceFor(downY - ev.getY()));
                     return true;
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
@@ -909,17 +1147,42 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                         vt.computeCurrentVelocity(1000);
                         float vy = vt.getYVelocity();
                         float target;
-                        if (vy < -700) target = 1f;
-                        else if (vy > 700) target = 0f;
+                        if (vy < -500) target = 1f;
+                        else if (vy > 500) target = 0f;
                         else target = progress > 0.5f ? 1f : 0f;
                         dragging = false;
                         animateTo(target, target == 1f ? -vy : vy);
+                    } else if (progress > 0f && progress < 1f) {
+                        animateTo(progress > 0.5f ? 1f : 0f);
                     }
                     dragging = false;
                     if (vt != null) { vt.recycle(); vt = null; }
                     return true;
             }
             return true;
+        }
+    }
+
+    /** The current wallpaper, pre-blurred and tiny; scaled up it costs one textured quad. */
+    static final class BlurView extends View {
+        private android.graphics.Bitmap bmp;
+        private final android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG);
+        private final android.graphics.Matrix m = new android.graphics.Matrix();
+
+        BlurView(Context c) { super(c); }
+
+        @Override public boolean hasOverlappingRendering() { return false; }
+
+        boolean hasBlur() { return bmp != null; }
+
+        void setBitmap(android.graphics.Bitmap b) { bmp = b; invalidate(); }
+
+        @Override protected void onDraw(android.graphics.Canvas c) {
+            if (bmp == null) return;
+            float s = Math.max(getWidth() / (float) bmp.getWidth(), getHeight() / (float) bmp.getHeight());
+            m.setScale(s, s);
+            m.postTranslate((getWidth() - bmp.getWidth() * s) / 2f, (getHeight() - bmp.getHeight() * s) / 2f);
+            c.drawBitmap(bmp, m, paint);
         }
     }
 }

@@ -129,6 +129,23 @@ final class Walls {
 
     private static void sleep(long ms) { try { Thread.sleep(ms); } catch (InterruptedException ignored) {} }
 
+    static Wall byId(String id) throws Exception {
+        JSONObject d = new JSONObject(new String(get("https://wallhaven.cc/api/v1/w/" + id, 15000), "UTF-8")).getJSONObject("data");
+        Wall w = new Wall();
+        w.id = d.getString("id");
+        w.full = d.getString("path");
+        w.page = d.optString("short_url");
+        w.thumb = d.getJSONObject("thumbs").optString("original");
+        w.width = d.optInt("dimension_x");
+        w.height = d.optInt("dimension_y");
+        w.theme = "Wallhaven";
+        JSONArray colors = d.optJSONArray("colors");
+        if (colors != null && colors.length() > 0) {
+            try { w.color = Color.parseColor(colors.getString(0)); } catch (Exception ignored) {}
+        }
+        return w;
+    }
+
     static Page search(Theme t, boolean popular, int page, String seed) throws Exception {
         StringBuilder u = new StringBuilder("https://wallhaven.cc/api/v1/search?purity=100&ratios=portrait&atleast=1080x1920");
         u.append("&categories=").append(t.categories);
@@ -314,15 +331,120 @@ final class Walls {
         return decodeForScreen(get(w.full, 30000), s[0], s[1]);
     }
 
+    /**
+     * Lets the visible launcher hide the system's wallpaper swap: Android tears down and
+     * rebinds its wallpaper window when a new image is set, which shows as a black blink.
+     */
+    interface Cover {
+        void show(Bitmap next, Runnable ready);
+        void settle();
+    }
+
+    static volatile Cover cover;
+
     /** Sets the wallpaper. Pass a ready bitmap (from a preview) to skip the download. */
     static void apply(Context c, Wall w, Bitmap ready) throws Exception {
         Bitmap b = ready != null ? ready : download(c, w);
         WallpaperManager wm = WallpaperManager.getInstance(c);
         int which = WallpaperManager.FLAG_SYSTEM | (lockToo(c) ? WallpaperManager.FLAG_LOCK : 0);
-        wm.setBitmap(b, null, true, which);
+        Cover cv = cover;
+        if (cv != null) {
+            java.util.concurrent.CountDownLatch shown = new java.util.concurrent.CountDownLatch(1);
+            cv.show(b, shown::countDown);
+            try { shown.await(700, java.util.concurrent.TimeUnit.MILLISECONDS); } catch (InterruptedException ignored) {}
+        }
+        try {
+            wm.setBitmap(b, null, true, which);
+        } finally {
+            if (cv != null) cv.settle();
+        }
         prefs(c).edit().putString("current", w.toJson().toString())
                 .putLong("lastChange", System.currentTimeMillis()).apply();
         addId(c, "history", w.id, 150);
+        saveBlur(c, w, b);
+    }
+
+    // ------------------------------------------------------------------ drawer blur
+
+    private static java.io.File blurFile(Context c) { return new java.io.File(c.getFilesDir(), "blur.png"); }
+
+    private static int wallpaperId(Context c) {
+        try { return WallpaperManager.getInstance(c).getWallpaperId(WallpaperManager.FLAG_SYSTEM); }
+        catch (Throwable t) { return -1; }
+    }
+
+    /** A tiny, heavily blurred copy of the wallpaper we just set, for behind the drawer. */
+    static void saveBlur(Context c, Wall w, Bitmap full) {
+        try {
+            Bitmap src = full;
+            if (src == null) {
+                byte[] d = get(w.thumb, 15000);
+                src = BitmapFactory.decodeByteArray(d, 0, d.length);
+            }
+            if (src == null) return;
+            int[] scr = screenSize(c);
+            int bw = scr[0] / 10, bh = scr[1] / 10;
+            Bitmap small = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888);
+            float s = Math.max(bw / (float) src.getWidth(), bh / (float) src.getHeight());
+            Matrix m = new Matrix();
+            m.setScale(s, s);
+            m.postTranslate((bw - src.getWidth() * s) / 2f, (bh - src.getHeight() * s) / 2f);
+            new Canvas(small).drawBitmap(src, m, new Paint(Paint.FILTER_BITMAP_FLAG));
+            boxBlur(small, 5);
+            boxBlur(small, 5);
+            boxBlur(small, 5);
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(blurFile(c))) {
+                small.compress(Bitmap.CompressFormat.PNG, 100, out);
+            }
+            prefs(c).edit().putInt("blurFor", wallpaperId(c)).apply();
+        } catch (Exception ignored) {}
+    }
+
+    /** The blur for the current wallpaper, or null if the wallpaper wasn't set by us. */
+    static Bitmap loadBlur(Context c) {
+        SharedPreferences p = prefs(c);
+        int id = wallpaperId(c);
+        if (!blurFile(c).exists() || p.getInt("blurFor", -2) != id) {
+            // first run after an update: the current wallpaper may be ours but unblurred
+            Wall cur = current(c);
+            if (cur == null || p.contains("blurFor")) return null;
+            saveBlur(c, cur, null);
+            if (!blurFile(c).exists()) return null;
+        }
+        Bitmap b = BitmapFactory.decodeFile(blurFile(c).getPath());
+        return b == null ? null : Icons.toHardware(b);
+    }
+
+    /** Separable box blur in place; three passes approximate a gaussian. */
+    private static void boxBlur(Bitmap b, int r) {
+        int w = b.getWidth(), h = b.getHeight();
+        int[] px = new int[w * h], tmp = new int[w * h];
+        b.getPixels(px, 0, w, 0, 0, w, h);
+        blurPass(px, tmp, w, h, r, true);
+        blurPass(tmp, px, w, h, r, false);
+        b.setPixels(px, 0, w, 0, 0, w, h);
+    }
+
+    private static void blurPass(int[] in, int[] out, int w, int h, int r, boolean horizontal) {
+        int len = horizontal ? w : h, lines = horizontal ? h : w;
+        int div = r * 2 + 1;
+        for (int l = 0; l < lines; l++) {
+            int sa = 0, sr = 0, sg = 0, sb = 0;
+            for (int k = -r; k <= r; k++) {
+                int i = Math.max(0, Math.min(len - 1, k));
+                int p = in[horizontal ? l * w + i : i * w + l];
+                sa += p >>> 24; sr += (p >> 16) & 255; sg += (p >> 8) & 255; sb += p & 255;
+            }
+            for (int i = 0; i < len; i++) {
+                out[horizontal ? l * w + i : i * w + l] = ((sa / div) << 24) | ((sr / div) << 16) | ((sg / div) << 8) | (sb / div);
+                int add = Math.min(len - 1, i + r + 1), rem = Math.max(0, i - r);
+                int pa = in[horizontal ? l * w + add : add * w + l], pr = in[horizontal ? l * w + rem : rem * w + l];
+                sa += (pa >>> 24) - (pr >>> 24);
+                sr += ((pa >> 16) & 255) - ((pr >> 16) & 255);
+                sg += ((pa >> 8) & 255) - ((pr >> 8) & 255);
+                sb += (pa & 255) - (pr & 255);
+            }
+        }
     }
 
     /** Picks and applies a new random wallpaper; optionally marks the current one disliked. */

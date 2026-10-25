@@ -269,15 +269,15 @@ final class WallpaperUi {
                 card.setTranslationY(card.getHeight() + Ui.dp(getContext(), 40));
                 card.setVisibility(VISIBLE);
                 card.setLayerType(LAYER_TYPE_HARDWARE, null);
-                card.animate().translationY(0).setDuration(420).setInterpolator(Ui.EMPHASIZED)
+                card.animate().translationY(0).setDuration(300).setInterpolator(Ui.EMPHASIZED)
                         .withEndAction(() -> card.setLayerType(LAYER_TYPE_NONE, null)).start();
-                backdrop.animate().alpha(1f).setDuration(300).start();
+                backdrop.animate().alpha(1f).setDuration(220).start();
             });
         }
 
         @Override void animateOut(Runnable done) {
             card.setLayerType(LAYER_TYPE_HARDWARE, null);
-            card.animate().translationY(card.getHeight() + Ui.dp(getContext(), 40)).setDuration(240)
+            card.animate().translationY(card.getHeight() + Ui.dp(getContext(), 40)).setDuration(190)
                     .setInterpolator(Ui.STANDARD).withEndAction(done).start();
             backdrop.animate().alpha(0f).setDuration(220).start();
         }
@@ -486,7 +486,7 @@ final class WallpaperUi {
             setAlpha(0f);
             setTranslationY(Ui.dp(getContext(), 48));
             setLayerType(LAYER_TYPE_HARDWARE, null);
-            animate().alpha(1f).translationY(0).setDuration(360).setInterpolator(Ui.EMPHASIZED)
+            animate().alpha(1f).translationY(0).setDuration(260).setInterpolator(Ui.EMPHASIZED)
                     .withEndAction(() -> setLayerType(LAYER_TYPE_NONE, null)).start();
         }
 
@@ -817,7 +817,7 @@ final class WallpaperUi {
             setAlpha(0f);
             setScaleX(0.96f); setScaleY(0.96f);
             setLayerType(LAYER_TYPE_HARDWARE, null);
-            animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(320).setInterpolator(Ui.EMPHASIZED)
+            animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(240).setInterpolator(Ui.EMPHASIZED)
                     .withEndAction(() -> setLayerType(LAYER_TYPE_NONE, null)).start();
         }
 

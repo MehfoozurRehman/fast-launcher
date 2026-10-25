@@ -33,7 +33,7 @@ import java.util.Set;
 final class Icons {
 
     /** Bump when the look changes so cached PNGs are re-rendered. */
-    private static final int VERSION = 7;
+    private static final int VERSION = 8;
     private static final float INNER = 0.72f; // artwork blob radius relative to the plate
 
     private Icons() {}
@@ -82,14 +82,12 @@ final class Icons {
         File f = cacheFile(c, ai, size);
         if (used != null) used.add(f.getName());
         if (f.exists()) {
-            Bitmap b = BitmapFactory.decodeFile(f.getPath());
+            Bitmap b = readRaw(f);
             if (b != null) return toHardware(b);
         }
         Bitmap b = render(c, pm, ai, size);
         if (b == null) return null;
-        try (FileOutputStream out = new FileOutputStream(f)) {
-            b.compress(Bitmap.CompressFormat.PNG, 100, out);
-        } catch (Exception ignored) {}
+        writeRaw(f, b);
         return toHardware(b);
     }
 
@@ -114,7 +112,43 @@ final class Icons {
         long stamp = 0;
         try { stamp = new File(ai.applicationInfo.sourceDir).lastModified(); } catch (Exception ignored) {}
         String key = ai.packageName + "/" + ai.name + "|" + stamp + "|" + size + "|v" + VERSION;
-        return new File(dir(c), md5(key) + ".png");
+        return new File(dir(c), md5(key) + ".px");
+    }
+
+    // Raw ARGB pixels with a tiny header: no PNG decode, so a cold start reads ~130 icons in
+    // tens of milliseconds instead of half a second.
+    private static void writeRaw(File f, Bitmap b) {
+        java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocate(b.getByteCount());
+        b.copyPixelsToBuffer(buf);
+        buf.rewind();
+        try (FileOutputStream out = new FileOutputStream(f);
+             java.nio.channels.FileChannel ch = out.getChannel()) {
+            java.nio.ByteBuffer head = java.nio.ByteBuffer.allocate(8);
+            head.putInt(b.getWidth()).putInt(b.getHeight()).flip();
+            ch.write(head);
+            ch.write(buf);
+        } catch (Exception e) {
+            f.delete();
+        }
+    }
+
+    private static Bitmap readRaw(File f) {
+        try (java.io.FileInputStream in = new java.io.FileInputStream(f);
+             java.nio.channels.FileChannel ch = in.getChannel()) {
+            java.nio.ByteBuffer head = java.nio.ByteBuffer.allocate(8);
+            if (ch.read(head) != 8) return null;
+            head.flip();
+            int w = head.getInt(), h = head.getInt();
+            if (w <= 0 || h <= 0 || w > 1024 || h > 1024) return null;
+            java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocate(w * h * 4);
+            while (buf.hasRemaining()) if (ch.read(buf) < 0) return null;
+            buf.rewind();
+            Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            b.copyPixelsFromBuffer(buf);
+            return b;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static String md5(String s) {

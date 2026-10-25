@@ -62,6 +62,7 @@ final class AppGridView extends View {
     private Map<String, Integer> notifs = Collections.emptyMap();
     private boolean slots;
     private long slotsSince;
+    private float reveal = 1f;
 
     private final OverScroller scroller;
     private final EdgeEffect bottomEdge;
@@ -97,6 +98,7 @@ final class AppGridView extends View {
         this.labels = labels;
         this.labelGap = 7 * d;
         scroller = new OverScroller(c);
+        scroller.setFriction(ViewConfiguration.getScrollFriction() * 0.7f); // longer, freer flings
         bottomEdge = new EdgeEffect(c);
         ViewConfiguration vc = ViewConfiguration.get(c);
         slop = vc.getScaledTouchSlop();
@@ -119,6 +121,8 @@ final class AppGridView extends View {
         slotPaint.setColor(0xCCFFFFFF);
         slotPaint.setPathEffect(new DashPathEffect(new float[]{6 * d, 5 * d}, 0));
     }
+
+    @Override public boolean hasOverlappingRendering() { return false; }
 
     void setListener(Listener l) { listener = l; }
 
@@ -148,6 +152,13 @@ final class AppGridView extends View {
     }
 
     boolean atTop() { return off <= 0.5f; }
+
+    /** 0..1 drawer progress: rows rise and fade in one after another while it opens. */
+    void setReveal(float p) {
+        if (p == reveal) return;
+        reveal = p;
+        invalidate();
+    }
 
     private String fit(String s, float maxW) {
         if (textPaint.measureText(s) <= maxW) return s;
@@ -197,9 +208,22 @@ final class AppGridView extends View {
         int firstRow = Math.max(0, (int) ((off - topPad) / rowH));
         int lastRow = (int) ((off + h - topPad) / rowH);
         float slotAlpha = slots ? Math.min(1f, (SystemClock.uptimeMillis() - slotsSince) / 180f) : 0f;
+        final boolean revealing = reveal < 1f;
         outer:
         for (int r = firstRow; r <= lastRow; r++) {
             float top = topPad + r * rowH - off;
+            int rowAlpha = 255;
+            if (revealing) {
+                // each row lags the one above it, so a slow drag shows a cascade
+                int k = r - firstRow;
+                float local = Math.max(0f, Math.min(1f, (reveal - k * 0.07f) / 0.55f));
+                float ease = 1f - (1f - local) * (1f - local);
+                top += (1f - ease) * (28 + k * 10) * density;
+                rowAlpha = Math.round(255 * ease);
+                if (rowAlpha == 0) continue;
+            }
+            iconPaint.setAlpha(slots ? 150 * rowAlpha / 255 : rowAlpha);
+            textPaint.setAlpha(rowAlpha);
             for (int c = 0; c < cols; c++) {
                 int i = r * cols + c;
                 if (i >= n) break outer;
@@ -214,10 +238,9 @@ final class AppGridView extends View {
                 Bitmap b = e.icon;
                 if (b != null && !e.blank) {
                     float pad = (b.getWidth() - iconSize) / 2f;
-                    iconPaint.setAlpha(slots ? 150 : 255);
                     canvas.drawBitmap(b, cx - b.getWidth() / 2f, top - pad, iconPaint);
                     Integer cnt = e.cn == null ? null : notifs.get(e.cn.getPackageName());
-                    if (cnt != null && !slots) drawBadge(canvas, cx + iconSize * 0.36f, top + iconSize * 0.12f, cnt);
+                    if (cnt != null && !slots && rowAlpha == 255) drawBadge(canvas, cx + iconSize * 0.36f, top + iconSize * 0.12f, cnt);
                 }
                 if (labels && e.drawLabel != null) {
                     canvas.drawText(e.drawLabel, cx, top + iconSize + labelGap + textPaint.getTextSize(), textPaint);
@@ -237,9 +260,6 @@ final class AppGridView extends View {
     private void drawBadge(Canvas c, float x, float y, int n) {
         String t = n > 99 ? "99+" : String.valueOf(n);
         float w = Math.max(badgeR * 2, badgeText.measureText(t) + badgeR * 0.9f);
-        float ring = 1.6f * density;
-        c.drawRoundRect(x - w / 2 - ring, y - badgeR - ring, x + w / 2 + ring, y + badgeR + ring,
-                badgeR + ring, badgeR + ring, badgeRing);
         c.drawRoundRect(x - w / 2, y - badgeR, x + w / 2, y + badgeR, badgeR, badgeR, badgePaint);
         c.drawText(t, x, y + badgeText.getTextSize() * 0.36f, badgeText);
     }
