@@ -4,7 +4,9 @@ import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.app.Activity;
-import android.app.AlertDialog;
+import android.app.ActivityOptions;
+import android.app.WallpaperColors;
+import android.app.WallpaperManager;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -13,43 +15,48 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
-import android.graphics.Bitmap;
-import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Paint;
-import android.graphics.Path;
-import android.graphics.RectF;
-import android.graphics.Typeface;
-import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.AlarmClock;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.WindowInsets;
+import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
-import android.view.animation.DecelerateInterpolator;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Collections;
-import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-public class MainActivity extends Activity {
+public class MainActivity extends Activity implements WallpaperUi.Host {
 
+    // Layout shared with the wallpaper preview so it can show "your home" exactly.
+    static final int CLOCK_TOP_DP = 112, DATE_TOP_DP = 196, DOCK_HEIGHT_DP = 190;
     private static final int DOCK_SLOTS = 10;
     private static final String[][] DEFAULT_DOCK = {
             {"com.google.android.apps.maps"}, {"com.wispr.flowapp"}, {"com.facebook.katana"},
@@ -64,18 +71,27 @@ public class MainActivity extends Activity {
 
     private Root root;
     private FrameLayout home, drawer;
-    private TextView clock, date, title;
+    private View topScrim;
+    private TextView clock, date, title, snackView;
     private EditText search;
+    private Ui.Glyph btnSearch;
     private AppGridView dock, grid;
-    private View btnSearch, btnStore, btnMenu;
 
     private final List<AppGridView.AppEntry> all = new ArrayList<>();
+    private List<AppGridView.AppEntry> shown = all;
     private final AppGridView.AppEntry[] dockEntries = new AppGridView.AppEntry[DOCK_SLOTS];
-    private final ExecutorService bg = Executors.newSingleThreadExecutor();
+    private List<AppGridView.AppEntry> dockShown = new ArrayList<>();
+    private final ExecutorService iconWorker = Executors.newSingleThreadExecutor();
+    private final ExecutorService wallWorker = Executors.newSingleThreadExecutor();
+    private final Handler main = new Handler(Looper.getMainLooper());
     private SharedPreferences prefs;
-    private boolean drawerOpen;
-    private boolean searching;
+    private boolean drawerOpen, searching, brightWall;
+    private int wallColor = 0xFF2A2C31;
     private int loadGen;
+    private AppGridView.AppEntry placing;
+    private final List<WallpaperUi.Overlay> overlays = new ArrayList<>();
+
+    // ================================================================ lifecycle
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -83,24 +99,15 @@ public class MainActivity extends Activity {
         iconPx = Math.round(44 * dp);
         prefs = getSharedPreferences("launcher", MODE_PRIVATE);
 
-        getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                        | (Build.VERSION.SDK_INT >= 26 ? View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR : 0)
-                        | (Build.VERSION.SDK_INT >= 23 ? View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR : 0));
-
         root = new Root(this);
         setContentView(root);
         buildHome();
         buildDrawer();
-        root.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
-            @Override public WindowInsets onApplyWindowInsets(View v, WindowInsets in) {
-                insetTop = in.getSystemWindowInsetTop();
-                insetBottom = in.getSystemWindowInsetBottom();
-                applyInsets();
-                return in;
-            }
+        root.setOnApplyWindowInsetsListener((v, in) -> {
+            insetTop = in.getSystemWindowInsetTop();
+            insetBottom = in.getSystemWindowInsetBottom();
+            applyInsets();
+            return in;
         });
 
         IntentFilter f = new IntentFilter();
@@ -110,87 +117,43 @@ public class MainActivity extends Activity {
         f.addDataScheme("package");
         registerReceiver(pkgReceiver, f);
 
-        loadApps();
+        watchWallpaperColors();
+        Walls.init(this);
+        loadApps(null);
     }
 
     @Override protected void onDestroy() {
         unregisterReceiver(pkgReceiver);
-        bg.shutdownNow();
+        iconWorker.shutdownNow();
+        wallWorker.shutdownNow();
         super.onDestroy();
     }
 
     private final BroadcastReceiver pkgReceiver = new BroadcastReceiver() {
-        @Override public void onReceive(Context c, Intent i) { loadApps(); }
+        @Override public void onReceive(Context c, Intent i) {
+            Uri d = i.getData();
+            loadApps(d == null ? null : d.getSchemeSpecificPart());
+        }
     };
 
     @Override protected void onNewIntent(Intent i) {
         super.onNewIntent(i);
-        if (Intent.ACTION_MAIN.equals(i.getAction())) {
-            if (searching) endSearch();
-            if (drawerOpen) root.animateTo(0f);
-        }
+        if (!Intent.ACTION_MAIN.equals(i.getAction())) return;
+        // Home pressed: unwind everything back to the plain home screen.
+        closeAllOverlays();
+        cancelPlacing();
+        if (searching) endSearch();
+        if (drawerOpen || root.progress > 0) root.animateTo(0f);
     }
 
     @Override public void onBackPressed() {
+        if (!overlays.isEmpty()) { overlays.get(overlays.size() - 1).close(); return; }
+        if (placing != null) { cancelPlacing(); return; }
         if (searching) { endSearch(); return; }
         if (drawerOpen) root.animateTo(0f);
     }
 
-    // ---------------------------------------------------------------- views
-
-    private int dpi(float v) { return Math.round(v * dp); }
-
-    private void buildHome() {
-        home = new FrameLayout(this);
-        root.addView(home, new FrameLayout.LayoutParams(-1, -1));
-
-        clock = new TextView(this);
-        clock.setTextColor(Color.WHITE);
-        clock.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 74);
-        clock.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        clock.setIncludeFontPadding(false);
-        clock.setGravity(Gravity.CENTER);
-        clock.setShadowLayer(dpi(6), 0, dpi(2), 0x40000000);
-        home.addView(clock, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
-
-        date = new TextView(this);
-        date.setTextColor(Color.WHITE);
-        date.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 21);
-        date.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        date.setIncludeFontPadding(false);
-        date.setGravity(Gravity.CENTER);
-        date.setShadowLayer(dpi(4), 0, dpi(1), 0x40000000);
-        home.addView(date, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
-
-        dock = new AppGridView(this, 5, 17, 90, 44, 0, 0, false, false);
-        dock.setListener(new AppGridView.Listener() {
-            @Override public void onTap(AppGridView.AppEntry e) { launch(e); }
-            @Override public void onLongPress(AppGridView.AppEntry e) { dockMenu(e); }
-        });
-        home.addView(dock, new FrameLayout.LayoutParams(-1, dpi(180), Gravity.BOTTOM));
-
-        updateClock();
-    }
-
-    private final Runnable tick = new Runnable() {
-        @Override public void run() {
-            updateClock();
-            long now = System.currentTimeMillis();
-            clock.postDelayed(this, 60000 - (now % 60000) + 50);
-        }
-    };
-
-    private void updateClock() {
-        java.util.Calendar c = java.util.Calendar.getInstance();
-        int h = c.get(java.util.Calendar.HOUR);
-        if (h == 0) h = 12;
-        clock.setText(h + ":" + String.format(Locale.US, "%02d", c.get(java.util.Calendar.MINUTE)));
-        date.setText(new java.text.SimpleDateFormat("EEE, d MMMM", Locale.getDefault()).format(c.getTime()));
-    }
-
-    private final NotifService.Changed notifChanged = new NotifService.Changed() {
-        @Override public void onNotifCountsChanged() { pushBadges(); }
-    };
+    private final NotifService.Changed notifChanged = this::pushBadges;
 
     private void pushBadges() {
         dock.setNotifCounts(NotifService.counts);
@@ -203,6 +166,11 @@ public class MainActivity extends Activity {
         pushBadges();
         clock.removeCallbacks(tick);
         tick.run();
+        // Backstop for the scheduled job, which OEM battery managers like to delay.
+        if (Walls.due(this) && !Walls.isBusy()) {
+            final Context app = getApplicationContext();
+            wallWorker.execute(() -> { try { Walls.next(app, false); } catch (Exception ignored) {} });
+        }
     }
 
     @Override protected void onPause() {
@@ -211,180 +179,267 @@ public class MainActivity extends Activity {
         super.onPause();
     }
 
+    // ================================================================ shared view factories
+
+    static TextView makeClock(Context c) {
+        TextView t = new TextView(c);
+        t.setTextColor(Color.WHITE);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 74);
+        t.setTypeface(Ui.MEDIUM);
+        t.setIncludeFontPadding(false);
+        t.setGravity(Gravity.CENTER);
+        t.setShadowLayer(Ui.dp(c, 6), 0, Ui.dp(c, 2), 0x40000000);
+        return t;
+    }
+
+    static TextView makeDate(Context c) {
+        TextView t = new TextView(c);
+        t.setTextColor(Color.WHITE);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 21);
+        t.setTypeface(Ui.MEDIUM);
+        t.setIncludeFontPadding(false);
+        t.setGravity(Gravity.CENTER);
+        t.setShadowLayer(Ui.dp(c, 4), 0, Ui.dp(c, 1), 0x40000000);
+        return t;
+    }
+
+    static AppGridView makeDock(Context c) { return new AppGridView(c, 5, 17, 90, 44, 10, 0, false, false); }
+
+    static String clockText(Calendar c) {
+        int h = c.get(Calendar.HOUR);
+        if (h == 0) h = 12;
+        return h + ":" + String.format(Locale.US, "%02d", c.get(Calendar.MINUTE));
+    }
+
+    static String dateText(Calendar c) {
+        return new SimpleDateFormat("EEE, d MMMM", Locale.getDefault()).format(c.getTime());
+    }
+
+    // ================================================================ home
+
+    private int dpi(float v) { return Math.round(v * dp); }
+
+    private void buildHome() {
+        home = new FrameLayout(this);
+        root.addView(home, new FrameLayout.LayoutParams(-1, -1));
+
+        // Only visible on bright wallpapers, to keep the white clock legible.
+        topScrim = new View(this);
+        topScrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0x55000000, 0x22000000, 0x00000000}));
+        topScrim.setAlpha(0f);
+        home.addView(topScrim, new FrameLayout.LayoutParams(-1, dpi(340), Gravity.TOP));
+
+        clock = makeClock(this);
+        home.addView(clock, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+        clock.setOnClickListener(v -> startSafely(new Intent(AlarmClock.ACTION_SHOW_ALARMS), v));
+        Ui.pressable(clock);
+
+        date = makeDate(this);
+        home.addView(date, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+        date.setOnClickListener(v -> startSafely(
+                Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALENDAR), v));
+        Ui.pressable(date);
+
+        dock = makeDock(this);
+        dock.setListener(new AppGridView.Listener() {
+            @Override public void onTap(AppGridView.AppEntry e, int index) {
+                if (placing != null) { placeAt(index); return; }
+                if (!e.blank) launch(e, dock, index);
+            }
+            @Override public void onLongPress(AppGridView.AppEntry e, int index, float cx, float cy) {
+                if (placing != null) return;
+                dockMenu(e, index, cx, cy);
+            }
+        });
+        home.addView(dock, new FrameLayout.LayoutParams(-1, dpi(DOCK_HEIGHT_DP), Gravity.BOTTOM));
+    }
+
+    private final Runnable tick = new Runnable() {
+        @Override public void run() {
+            Calendar c = Calendar.getInstance();
+            clock.setText(clockText(c));
+            date.setText(dateText(c));
+            long now = System.currentTimeMillis();
+            clock.postDelayed(this, 60000 - (now % 60000) + 50);
+        }
+    };
+
     private void buildDrawer() {
         drawer = new FrameLayout(this);
-        drawer.setBackgroundColor(0x55000000);
+        drawer.setBackgroundColor(0x59000000);
         drawer.setVisibility(View.INVISIBLE);
         root.addView(drawer, new FrameLayout.LayoutParams(-1, -1));
+
+        grid = new AppGridView(this, 5, 17, 97, 44, 12, 12, true, true);
+        grid.setListener(new AppGridView.Listener() {
+            @Override public void onTap(AppGridView.AppEntry e, int index) { launch(e, grid, index); }
+            @Override public void onLongPress(AppGridView.AppEntry e, int index, float cx, float cy) {
+                appMenu(e, cx, cy);
+            }
+        });
+        drawer.addView(grid, new FrameLayout.LayoutParams(-1, -1, Gravity.TOP));
 
         title = new TextView(this);
         title.setText("All apps");
         title.setTextColor(Color.WHITE);
         title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 28);
-        title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        title.setTypeface(Ui.MEDIUM);
         title.setIncludeFontPadding(false);
         title.setShadowLayer(dpi(3), 0, dpi(1), 0x55000000);
         drawer.addView(title, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START));
 
         search = new EditText(this);
         search.setHint("Search apps");
-        search.setHintTextColor(0xBBFFFFFF);
+        search.setHintTextColor(0x99FFFFFF);
         search.setTextColor(Color.WHITE);
-        search.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
+        search.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
         search.setSingleLine(true);
-        search.setBackground(null);
+        search.setImeOptions(EditorInfo.IME_ACTION_GO);
+        search.setBackground(Ui.round(0x26FFFFFF, dpi(24)));
+        search.setPadding(dpi(20), 0, dpi(20), 0);
         search.setVisibility(View.GONE);
         search.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
             public void onTextChanged(CharSequence s, int a, int b, int c) { filter(s.toString()); }
             public void afterTextChanged(Editable s) {}
         });
+        search.setOnEditorActionListener((v, action, ev) -> {
+            if (!shown.isEmpty()) launch(shown.get(0), grid, 0);
+            return true;
+        });
         drawer.addView(search, new FrameLayout.LayoutParams(-1, dpi(48), Gravity.TOP));
 
-        btnSearch = new HeaderBtn(this, 0);
-        btnStore = new HeaderBtn(this, 1);
-        btnMenu = new HeaderBtn(this, 2);
-        for (View v : new View[]{btnSearch, btnStore, btnMenu})
-            drawer.addView(v, new FrameLayout.LayoutParams(dpi(44), dpi(44), Gravity.TOP | Gravity.END));
-        btnSearch.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { beginSearch(); }
-        });
-        btnStore.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { openStore(); }
-        });
-        btnMenu.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { headerMenu(); }
-        });
-
-        grid = new AppGridView(this, 5, 17, 97, 44, 8, 12, true, true);
-        grid.setListener(new AppGridView.Listener() {
-            @Override public void onTap(AppGridView.AppEntry e) { launch(e); }
-            @Override public void onLongPress(AppGridView.AppEntry e) { appMenu(e); }
-        });
-        drawer.addView(grid, new FrameLayout.LayoutParams(-1, -1, Gravity.TOP));
+        btnSearch = new Ui.Glyph(this, Ui.G_SEARCH, Color.WHITE);
+        btnSearch.setPadding(dpi(10), dpi(10), dpi(10), dpi(10));
+        btnSearch.setClickable(true);
+        btnSearch.setOnClickListener(v -> beginSearch());
+        Ui.pressable(btnSearch);
+        drawer.addView(btnSearch, new FrameLayout.LayoutParams(dpi(48), dpi(48), Gravity.TOP | Gravity.END));
     }
 
     private void applyInsets() {
-        float d = dp;
-        // clock digits centre ~ 150dp from the top, date just below
         FrameLayout.LayoutParams cp = (FrameLayout.LayoutParams) clock.getLayoutParams();
-        cp.topMargin = dpi(112);
+        cp.topMargin = dpi(CLOCK_TOP_DP);
         clock.setLayoutParams(cp);
         FrameLayout.LayoutParams dpm = (FrameLayout.LayoutParams) date.getLayoutParams();
-        dpm.topMargin = dpi(112 + 84);
+        dpm.topMargin = dpi(DATE_TOP_DP);
         date.setLayoutParams(dpm);
 
         FrameLayout.LayoutParams dk = (FrameLayout.LayoutParams) dock.getLayoutParams();
-        dk.bottomMargin = Math.max(insetBottom, dpi(8)) + dpi(4) - dpi(25);
+        dk.bottomMargin = dockBottomMargin();
         dock.setLayoutParams(dk);
 
         int headerTop = insetTop + dpi(14);
         FrameLayout.LayoutParams tp = (FrameLayout.LayoutParams) title.getLayoutParams();
-        tp.topMargin = headerTop + dpi(4);
+        tp.topMargin = headerTop + dpi(8);
         tp.leftMargin = dpi(23);
         title.setLayoutParams(tp);
         FrameLayout.LayoutParams sp = (FrameLayout.LayoutParams) search.getLayoutParams();
         sp.topMargin = headerTop;
-        sp.leftMargin = dpi(23);
-        sp.rightMargin = dpi(23);
+        sp.leftMargin = dpi(16);
+        sp.rightMargin = dpi(16);
         search.setLayoutParams(sp);
-        int[] rights = {dpi(40 + 44 + 44), dpi(40 + 44), dpi(40)};
-        View[] bs = {btnSearch, btnStore, btnMenu};
-        for (int i = 0; i < 3; i++) {
-            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) bs[i].getLayoutParams();
-            lp.topMargin = headerTop - dpi(2);
-            lp.rightMargin = rights[i] - dpi(40) + dpi(6) + (i == 0 ? dpi(4) : 0);
-            bs[i].setLayoutParams(lp);
-        }
+        FrameLayout.LayoutParams bp = (FrameLayout.LayoutParams) btnSearch.getLayoutParams();
+        bp.topMargin = headerTop;
+        bp.rightMargin = dpi(14);
+        btnSearch.setLayoutParams(bp);
         FrameLayout.LayoutParams gp = (FrameLayout.LayoutParams) grid.getLayoutParams();
-        gp.topMargin = insetTop + dpi(78);
+        gp.topMargin = insetTop + dpi(74);
         grid.setLayoutParams(gp);
         grid.setBottomInset(insetBottom);
-        root.requestLayout();
     }
 
-    // ---------------------------------------------------------------- apps
+    // ================================================================ wallpaper colours
 
-    private void loadApps() {
+    private void watchWallpaperColors() {
+        if (Build.VERSION.SDK_INT < 27) return;
+        WallpaperManager wm = WallpaperManager.getInstance(this);
+        try { onWallColors(wm.getWallpaperColors(WallpaperManager.FLAG_SYSTEM)); } catch (Exception ignored) {}
+        wm.addOnColorsChangedListener((colors, which) -> {
+            if ((which & WallpaperManager.FLAG_SYSTEM) != 0) onWallColors(colors);
+        }, main);
+    }
+
+    private void onWallColors(WallpaperColors wc) {
+        if (wc == null) return;
+        wallColor = wc.getPrimaryColor().toArgb();
+        boolean bright;
+        if (Build.VERSION.SDK_INT >= 31) {
+            bright = (wc.getColorHints() & WallpaperColors.HINT_SUPPORTS_DARK_TEXT) != 0;
+        } else {
+            bright = Color.luminance(wallColor) > 0.55f;
+        }
+        brightWall = bright;
+        topScrim.animate().alpha(bright ? 1f : 0f).setDuration(400).start();
+        drawer.setBackgroundColor(bright ? 0x8C000000 : 0x59000000);
+        updateBars();
+    }
+
+    /** Dark status icons only on a bright wallpaper with nothing dark on top of it. */
+    private void updateBars() {
+        boolean darkIcons = brightWall && overlays.isEmpty() && root.progress < 0.5f;
+        int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
+        if (darkIcons) flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        View d = getWindow().getDecorView();
+        if (d.getSystemUiVisibility() != flags) d.setSystemUiVisibility(flags);
+    }
+
+    // ================================================================ apps
+
+    private void loadApps(final String changedPkg) {
         final int gen = ++loadGen;
-        bg.execute(new Runnable() {
-            @Override public void run() {
-                PackageManager pm = getPackageManager();
-                Intent q = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
-                List<ResolveInfo> ris = pm.queryIntentActivities(q, 0);
-                final List<AppGridView.AppEntry> list = new ArrayList<>();
-                for (ResolveInfo ri : ris) {
-                    AppGridView.AppEntry e = new AppGridView.AppEntry();
-                    e.label = String.valueOf(ri.loadLabel(pm));
-                    e.lower = e.label.toLowerCase(Locale.getDefault());
-                    e.cn = new ComponentName(ri.activityInfo.packageName, ri.activityInfo.name);
-                    list.add(e);
-                }
-                Collections.sort(list, new Comparator<AppGridView.AppEntry>() {
-                    @Override public int compare(AppGridView.AppEntry a, AppGridView.AppEntry b) {
-                        return a.lower.compareTo(b.lower);
-                    }
-                });
-                // reuse already-rendered icons so reloads are instant
-                for (AppGridView.AppEntry e : list)
-                    for (AppGridView.AppEntry old : all)
-                        if (old.cn.equals(e.cn)) { e.icon = old.icon; break; }
-                runOnUiThread(new Runnable() {
-                    @Override public void run() {
-                        if (gen != loadGen) return;
-                        all.clear();
-                        all.addAll(list);
-                        resolveDock();
-                        if (!searching) grid.setItems(all);
-                        dock.setItems(dockList());
-                    }
-                });
-                // render missing icons off the UI thread, drawer order first
-                int n = 0;
-                for (AppGridView.AppEntry e : list) {
-                    if (gen != loadGen) return;
-                    if (e.icon == null) {
-                        e.icon = safeIcon(pm, e);
-                        if (++n % 10 == 0) { grid.postInvalidate(); dock.postInvalidate(); }
-                    }
-                }
-                grid.postInvalidate();
-                dock.postInvalidate();
+        final List<AppGridView.AppEntry> previous = new ArrayList<>(all);
+        iconWorker.execute(() -> {
+            PackageManager pm = getPackageManager();
+            Intent q = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+            List<ResolveInfo> ris = pm.queryIntentActivities(q, 0);
+            final List<AppGridView.AppEntry> list = new ArrayList<>();
+            for (ResolveInfo ri : ris) {
+                if (ri.activityInfo.packageName.equals(getPackageName())) continue;
+                AppGridView.AppEntry e = new AppGridView.AppEntry();
+                e.label = String.valueOf(ri.loadLabel(pm)).trim();
+                e.lower = e.label.toLowerCase(Locale.getDefault());
+                e.ai = ri.activityInfo;
+                e.cn = new ComponentName(ri.activityInfo.packageName, ri.activityInfo.name);
+                list.add(e);
             }
+            Collections.sort(list, (a, b) -> a.lower.compareTo(b.lower));
+            // keep icons already in memory, except for the package that just changed
+            for (AppGridView.AppEntry e : list) {
+                if (e.cn.getPackageName().equals(changedPkg)) continue;
+                for (AppGridView.AppEntry old : previous)
+                    if (old.cn.equals(e.cn)) { e.icon = old.icon; break; }
+            }
+            main.post(() -> {
+                if (gen != loadGen) return;
+                all.clear();
+                all.addAll(list);
+                resolveDock();
+                if (searching) filter(search.getText().toString()); else { shown = all; grid.setItems(all); }
+                dock.setItems(dockShown);
+            });
+            // dock first so the home screen fills in before the drawer
+            List<AppGridView.AppEntry> order = new ArrayList<>(list);
+            Collections.sort(order, (a, b) -> Boolean.compare(!inDefaultDock(b), !inDefaultDock(a)));
+            Set<String> used = new HashSet<>();
+            int n = 0;
+            for (AppGridView.AppEntry e : order) {
+                if (gen != loadGen) return;
+                if (e.icon == null) e.icon = Icons.load(this, pm, e.ai, iconPx, used);
+                else Icons.markUsed(this, e.ai, iconPx, used);
+                if (++n % 8 == 0) { grid.postInvalidate(); dock.postInvalidate(); }
+            }
+            grid.postInvalidate();
+            dock.postInvalidate();
+            if (gen == loadGen) Icons.prune(this, used);
         });
     }
 
-    private Bitmap safeIcon(PackageManager pm, AppGridView.AppEntry e) {
-        try { return render(pm.getActivityIcon(e.cn)); } catch (Throwable t) {
-            android.util.Log.w("FastLauncher", "icon failed " + e.cn + ": " + t);
-        }
-        try { return render(pm.getApplicationIcon(e.cn.getPackageName())); } catch (Throwable t) {
-            android.util.Log.w("FastLauncher", "app icon failed " + e.cn + ": " + t);
-        }
-        try { return render(pm.getDefaultActivityIcon()); } catch (Throwable t) { return null; }
-    }
-
-    private Bitmap render(Drawable d) {
-        int s = iconPx;
-        Bitmap bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
-        Canvas c = new Canvas(bmp);
-        boolean adaptive = Build.VERSION.SDK_INT >= 26 && d instanceof android.graphics.drawable.AdaptiveIconDrawable;
-        if (adaptive) {
-            d.setBounds(0, 0, s, s);
-            d.draw(c);
-        } else {
-            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-            p.setColor(Color.WHITE);
-            c.drawRoundRect(new RectF(0, 0, s, s), s * 0.30f, s * 0.30f, p);
-            int in = Math.round(s * 0.17f);
-            d.setBounds(in, in, s - in, s - in);
-            d.draw(c);
-        }
-        if (Build.VERSION.SDK_INT >= 26) {
-            Bitmap hw = bmp.copy(Bitmap.Config.HARDWARE, false);
-            if (hw != null) { bmp.recycle(); return hw; }
-        }
-        return bmp;
+    private boolean inDefaultDock(AppGridView.AppEntry e) {
+        String saved = prefs.getString("dock", "");
+        return saved.contains(e.cn.getPackageName());
     }
 
     private void resolveDock() {
@@ -393,17 +448,26 @@ public class MainActivity extends Activity {
         for (int i = 0; i < DOCK_SLOTS; i++) {
             AppGridView.AppEntry e = null;
             if (parts != null && i < parts.length && !parts[i].isEmpty()) {
-                ComponentName cn = ComponentName.unflattenFromString(parts[i]);
-                e = byComponent(cn);
+                e = byComponent(ComponentName.unflattenFromString(parts[i]));
             } else if (parts == null) {
-                for (String pkg : DEFAULT_DOCK[i]) {
-                    e = byPackage(pkg);
-                    if (e != null) break;
-                }
+                for (String pkg : DEFAULT_DOCK[i]) { e = byPackage(pkg); if (e != null) break; }
             }
             dockEntries[i] = e;
         }
         if (parts == null) saveDock();
+        rebuildDockList();
+    }
+
+    private void rebuildDockList() {
+        List<AppGridView.AppEntry> l = new ArrayList<>();
+        for (AppGridView.AppEntry e : dockEntries) {
+            if (e != null) { l.add(e); continue; }
+            AppGridView.AppEntry blank = new AppGridView.AppEntry();
+            blank.blank = true;
+            blank.label = "";
+            l.add(blank);
+        }
+        dockShown = l;
     }
 
     private void saveDock() {
@@ -413,21 +477,6 @@ public class MainActivity extends Activity {
             if (dockEntries[i] != null) sb.append(dockEntries[i].cn.flattenToString());
         }
         prefs.edit().putString("dock", sb.toString()).apply();
-    }
-
-    private List<AppGridView.AppEntry> dockList() {
-        List<AppGridView.AppEntry> l = new ArrayList<>();
-        for (AppGridView.AppEntry e : dockEntries) {
-            if (e != null) l.add(e);
-            else l.add(blank());
-        }
-        return l;
-    }
-
-    private AppGridView.AppEntry blank() {
-        AppGridView.AppEntry e = new AppGridView.AppEntry();
-        e.label = ""; e.lower = ""; e.cn = new ComponentName("app.fastlauncher", "blank");
-        return e;
     }
 
     private AppGridView.AppEntry byPackage(String pkg) {
@@ -441,128 +490,292 @@ public class MainActivity extends Activity {
         return null;
     }
 
-    private void launch(AppGridView.AppEntry e) {
-        if (e.cn.getClassName().equals("blank")) return;
+    /** Launch with the app zooming out of its icon. */
+    private void launch(AppGridView.AppEntry e, AppGridView from, int index) {
+        if (e.blank || e.cn == null) return;
         Intent i = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
                 .setComponent(e.cn).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-        try { startActivity(i); } catch (Exception ignored) {}
+        Bundle opts = null;
+        if (from != null && index >= 0) {
+            float[] c = from.cellCenter(index);
+            int s = Math.round(from.iconSizePx());
+            opts = ActivityOptions.makeScaleUpAnimation(from, Math.round(c[0] - s / 2f), Math.round(c[1] - s / 2f), s, s).toBundle();
+        }
+        try { startActivity(i, opts); } catch (Exception ex) { snack("Couldn't open " + e.label); return; }
         if (drawerOpen) {
             if (searching) endSearch();
-            root.postDelayed(new Runnable() { @Override public void run() { root.snapTo(0f); } }, 300);
+            root.postDelayed(() -> root.snapTo(0f), 350);
         }
     }
 
-    // ---------------------------------------------------------------- menus
-
-    private void appMenu(final AppGridView.AppEntry e) {
-        new AlertDialog.Builder(this).setTitle(e.label)
-                .setItems(new String[]{"Add to home dock", "App info", "Uninstall"},
-                        new android.content.DialogInterface.OnClickListener() {
-                            @Override public void onClick(android.content.DialogInterface d, int w) {
-                                if (w == 0) pickSlot(e);
-                                else if (w == 1) startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                        Uri.parse("package:" + e.cn.getPackageName())));
-                                else startActivity(new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + e.cn.getPackageName())));
-                            }
-                        }).show();
+    private void startSafely(Intent i, View from) {
+        try {
+            Bundle o = from == null ? null
+                    : ActivityOptions.makeScaleUpAnimation(from, 0, 0, from.getWidth(), from.getHeight()).toBundle();
+            startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), o);
+        } catch (Exception ignored) {}
     }
 
-    private void pickSlot(final AppGridView.AppEntry e) {
-        String[] names = new String[DOCK_SLOTS];
-        for (int i = 0; i < DOCK_SLOTS; i++)
-            names[i] = "Row " + (i / 5 + 1) + ", slot " + (i % 5 + 1)
-                    + (dockEntries[i] != null ? "  (" + dockEntries[i].label + ")" : "");
-        new AlertDialog.Builder(this).setTitle("Put " + e.label + " in…")
-                .setItems(names, new android.content.DialogInterface.OnClickListener() {
-                    @Override public void onClick(android.content.DialogInterface d, int w) {
-                        dockEntries[w] = e;
-                        saveDock();
-                        dock.setItems(dockList());
-                    }
-                }).show();
+    // ================================================================ menus & dock placing
+
+    private void appMenu(final AppGridView.AppEntry e, float cx, float cy) {
+        int[] loc = new int[2];
+        grid.getLocationInWindow(loc);
+        new Popup(this, e.label, new String[]{"Add to dock", "App info", "Uninstall"}, loc[0] + cx, loc[1] + cy,
+                grid.iconSizePx(), which -> {
+            if (which == 0) startPlacing(e);
+            else if (which == 1) appInfo(e);
+            else startSafely(new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + e.cn.getPackageName())), null);
+        }).open();
     }
 
-    private void dockMenu(final AppGridView.AppEntry e) {
-        if (e.cn.getClassName().equals("blank")) return;
-        new AlertDialog.Builder(this).setTitle(e.label)
-                .setItems(new String[]{"Remove from dock", "App info"},
-                        new android.content.DialogInterface.OnClickListener() {
-                            @Override public void onClick(android.content.DialogInterface d, int w) {
-                                if (w == 0) {
-                                    for (int i = 0; i < DOCK_SLOTS; i++) if (dockEntries[i] == e) dockEntries[i] = null;
-                                    saveDock();
-                                    dock.setItems(dockList());
-                                } else startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                        Uri.parse("package:" + e.cn.getPackageName())));
-                            }
-                        }).show();
+    private void dockMenu(final AppGridView.AppEntry e, final int index, float cx, float cy) {
+        if (e.blank) return;
+        int[] loc = new int[2];
+        dock.getLocationInWindow(loc);
+        new Popup(this, e.label, new String[]{"Remove from dock", "App info"}, loc[0] + cx, loc[1] + cy,
+                dock.iconSizePx(), which -> {
+            if (which == 0) {
+                dockEntries[index] = null;
+                saveDock();
+                rebuildDockList();
+                dock.setItems(dockShown);
+            } else appInfo(e);
+        }).open();
     }
 
-    private void headerMenu() {
-        new AlertDialog.Builder(this)
-                .setItems(new String[]{"Change wallpaper", "Display settings", "Default home app"},
-                        new android.content.DialogInterface.OnClickListener() {
-                            @Override public void onClick(android.content.DialogInterface d, int w) {
-                                try {
-                                    if (w == 0) startActivity(Intent.createChooser(new Intent(Intent.ACTION_SET_WALLPAPER), "Wallpaper"));
-                                    else if (w == 1) startActivity(new Intent(Settings.ACTION_DISPLAY_SETTINGS));
-                                    else startActivity(new Intent(Settings.ACTION_HOME_SETTINGS));
-                                } catch (Exception ignored) {}
-                            }
-                        }).show();
+    private void appInfo(AppGridView.AppEntry e) {
+        startSafely(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:" + e.cn.getPackageName())), null);
     }
 
-    private void openStore() {
-        for (String pkg : new String[]{"com.android.vending", "com.hihonor.appmarket"}) {
-            Intent i = getPackageManager().getLaunchIntentForPackage(pkg);
-            if (i != null) { startActivity(i); return; }
-        }
+    private void startPlacing(AppGridView.AppEntry e) {
+        placing = e;
+        if (searching) endSearch();
+        root.animateTo(0f);
+        dock.setSlotOutlines(true);
+        snack("Tap a spot in the dock for " + e.label, 0);
     }
 
-    // ---------------------------------------------------------------- search
+    private void placeAt(int index) {
+        AppGridView.AppEntry e = placing;
+        // if it's already in the dock, move it rather than duplicate it
+        for (int i = 0; i < DOCK_SLOTS; i++) if (dockEntries[i] == e) dockEntries[i] = null;
+        dockEntries[index] = e;
+        saveDock();
+        rebuildDockList();
+        dock.setItems(dockShown);
+        dock.performHapticFeedback(HapticFeedbackConstants.CONFIRM);
+        cancelPlacing();
+    }
+
+    private void cancelPlacing() {
+        if (placing == null) return;
+        placing = null;
+        dock.setSlotOutlines(false);
+        hideSnack();
+    }
+
+    // ================================================================ search
 
     private void beginSearch() {
         searching = true;
-        title.setVisibility(View.INVISIBLE);
+        title.animate().alpha(0f).setDuration(120).withEndAction(() -> title.setVisibility(View.INVISIBLE)).start();
         btnSearch.setVisibility(View.GONE);
-        btnStore.setVisibility(View.GONE);
-        btnMenu.setVisibility(View.GONE);
         search.setText("");
         search.setVisibility(View.VISIBLE);
+        search.setAlpha(0f);
+        search.animate().alpha(1f).setDuration(160).start();
         search.requestFocus();
         ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).showSoftInput(search, 0);
     }
 
     private void endSearch() {
         searching = false;
-        ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE))
-                .hideSoftInputFromWindow(search.getWindowToken(), 0);
+        ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(search.getWindowToken(), 0);
         search.setVisibility(View.GONE);
         title.setVisibility(View.VISIBLE);
+        title.setAlpha(1f);
         btnSearch.setVisibility(View.VISIBLE);
-        btnStore.setVisibility(View.VISIBLE);
-        btnMenu.setVisibility(View.VISIBLE);
+        shown = all;
         grid.setItems(all);
     }
 
     private void filter(String q) {
         q = q.trim().toLowerCase(Locale.getDefault());
-        List<AppGridView.AppEntry> l = new ArrayList<>();
-        for (AppGridView.AppEntry e : all) if (q.isEmpty() || e.lower.contains(q)) l.add(e);
-        grid.setItems(l);
+        if (q.isEmpty()) { shown = all; grid.setItems(all); return; }
+        // prefix matches (on any word) first, then anything containing the text
+        List<AppGridView.AppEntry> starts = new ArrayList<>(), contains = new ArrayList<>();
+        for (AppGridView.AppEntry e : all) {
+            if (e.lower.startsWith(q) || e.lower.contains(" " + q)) starts.add(e);
+            else if (e.lower.contains(q)) contains.add(e);
+        }
+        starts.addAll(contains);
+        shown = starts;
+        grid.setItems(starts);
     }
 
-    // ---------------------------------------------------------------- drawer gesture
+    // ================================================================ snack
+
+    private final Runnable hideSnackLater = this::hideSnack;
+
+    @Override public void snack(String msg) { snack(msg, 2400); }
+
+    private void snack(String msg, long ms) {
+        if (snackView == null) {
+            snackView = Ui.text(this, "", 14, Ui.FG, true);
+            snackView.setBackground(Ui.round(0xF0202226, dpi(22)));
+            snackView.setPadding(dpi(18), dpi(13), dpi(18), dpi(13));
+            snackView.setGravity(Gravity.CENTER);
+            snackView.setElevation(dpi(6));
+        }
+        if (snackView.getParent() == null) {
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+            lp.bottomMargin = dockBottomMargin() + dpi(DOCK_HEIGHT_DP + 16);
+            lp.leftMargin = lp.rightMargin = dpi(24);
+            root.addView(snackView, lp);
+        } else {
+            snackView.bringToFront();
+        }
+        snackView.setText(msg);
+        snackView.removeCallbacks(hideSnackLater);
+        snackView.setAlpha(0f);
+        snackView.setTranslationY(dpi(12));
+        snackView.animate().alpha(1f).translationY(0).setDuration(220).setInterpolator(Ui.EMPHASIZED).start();
+        if (ms > 0) snackView.postDelayed(hideSnackLater, ms);
+    }
+
+    private void hideSnack() {
+        if (snackView == null || snackView.getParent() == null) return;
+        snackView.animate().alpha(0f).translationY(dpi(8)).setDuration(180)
+                .withEndAction(() -> { if (snackView.getAlpha() == 0f) root.removeView(snackView); }).start();
+    }
+
+    // ================================================================ WallpaperUi.Host
+
+    @Override public Context context() { return this; }
+    @Override public FrameLayout overlayParent() { return root; }
+    @Override public int insetTop() { return insetTop; }
+    @Override public int insetBottom() { return insetBottom; }
+    @Override public ExecutorService wallWorker() { return wallWorker; }
+    @Override public List<AppGridView.AppEntry> dockItems() { return dockShown; }
+    @Override public int dockBottomMargin() { return Math.max(insetBottom, dpi(8)) + dpi(4) - dpi(25); }
+    @Override public int wallpaperColor() { return wallColor; }
+    @Override public void runOnUi(Runnable r) { main.post(r); }
+
+    @Override public void overlayOpened(WallpaperUi.Overlay o) {
+        overlays.add(o);
+        if (snackView != null && snackView.getParent() != null) snackView.bringToFront();
+        updateBars();
+    }
+
+    @Override public void overlayClosed(WallpaperUi.Overlay o) {
+        overlays.remove(o);
+        updateBars();
+    }
+
+    @Override public void closeAllOverlays() {
+        for (int i = overlays.size() - 1; i >= 0; i--) overlays.get(i).close();
+    }
+
+    private void openWallpaper() {
+        if (!overlays.isEmpty()) return;
+        cancelPlacing();
+        new WallpaperUi.Sheet(this).open();
+    }
+
+    // ================================================================ popup menu
+
+    interface OnItem { void onItem(int which); }
+
+    /** A small card anchored to an icon, instead of a system dialog. */
+    static final class Popup extends WallpaperUi.Overlay {
+        private final LinearLayout card;
+        private final View dim;
+
+        Popup(WallpaperUi.Host h, String heading, String[] items, final float ax, final float ay, final float iconSize,
+              final OnItem cb) {
+            super(h);
+            Context c = getContext();
+            dim = new View(c);
+            dim.setBackgroundColor(0x33000000);
+            dim.setAlpha(0f);
+            dim.setOnClickListener(v -> close());
+            addView(dim, new FrameLayout.LayoutParams(-1, -1));
+
+            card = new LinearLayout(c);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setBackground(Ui.round(0xF7202227, Ui.dp(c, 22)));
+            card.setPadding(0, Ui.dpi(c, 8), 0, Ui.dpi(c, 8));
+            card.setElevation(Ui.dp(c, 12));
+            TextView head = Ui.text(c, heading, 12.5f, Ui.FG3, true);
+            head.setPadding(Ui.dpi(c, 20), Ui.dpi(c, 8), Ui.dpi(c, 20), Ui.dpi(c, 6));
+            head.setSingleLine(true);
+            head.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            card.addView(head);
+            for (int i = 0; i < items.length; i++) {
+                final int which = i;
+                TextView row = Ui.text(c, items[i], 16, Ui.FG, false);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(Ui.dpi(c, 20), 0, Ui.dpi(c, 20), 0);
+                row.setClickable(true);
+                row.setBackground(Ui.round(0x00000000, Ui.dp(c, 14)));
+                row.setOnTouchListener((v, ev) -> {
+                    if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) v.setBackground(Ui.round(0x1FFFFFFF, Ui.dp(c, 14)));
+                    else if (ev.getActionMasked() == MotionEvent.ACTION_UP || ev.getActionMasked() == MotionEvent.ACTION_CANCEL)
+                        v.setBackground(Ui.round(0x00000000, Ui.dp(c, 14)));
+                    return false;
+                });
+                row.setOnClickListener(v -> { close(); cb.onItem(which); });
+                LinearLayout.LayoutParams rp = Ui.lp(-1, Ui.dpi(c, 48));
+                rp.leftMargin = rp.rightMargin = Ui.dpi(c, 6);
+                card.addView(row, rp);
+            }
+            int w = Ui.dpi(c, 230);
+            card.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.UNSPECIFIED);
+            int ch = card.getMeasuredHeight();
+            int screenW = c.getResources().getDisplayMetrics().widthPixels;
+            int margin = Ui.dpi(c, 12);
+            float gap = iconSize / 2f + Ui.dp(c, 14);
+            boolean above = ay - gap - ch > h.insetTop() + margin;
+            int x = Math.round(Math.max(margin, Math.min(screenW - margin - w, ax - w / 2f)));
+            int y = Math.round(above ? ay - gap - ch : ay + gap);
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(w, -2, Gravity.TOP | Gravity.START);
+            lp.leftMargin = x;
+            lp.topMargin = y;
+            addView(card, lp);
+            card.setPivotX(Math.max(0, Math.min(w, ax - x)));
+            card.setPivotY(above ? ch : 0);
+        }
+
+        @Override void animateIn() {
+            card.setAlpha(0f);
+            card.setScaleX(0.86f);
+            card.setScaleY(0.86f);
+            card.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(220).setInterpolator(Ui.EMPHASIZED).start();
+            dim.animate().alpha(1f).setDuration(180).start();
+        }
+
+        @Override void animateOut(Runnable done) {
+            card.animate().alpha(0f).scaleX(0.92f).scaleY(0.92f).setDuration(130).setInterpolator(Ui.STANDARD).start();
+            dim.animate().alpha(0f).setDuration(130).withEndAction(done).start();
+        }
+    }
+
+    // ================================================================ gestures
 
     final class Root extends FrameLayout {
-        private float progress; // 0 closed .. 1 open
+        float progress; // 0 closed .. 1 open
         private float downX, downY, startProgress;
-        private boolean dragging, layered;
+        private boolean dragging, layered, barsDark = true;
         private VelocityTracker vt;
         private ValueAnimator anim;
         private final int slop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
-        private final android.view.animation.Interpolator settle =
-                new android.view.animation.PathInterpolator(0.05f, 0.7f, 0.1f, 1f);
+        private final Runnable homeLongPress = () -> {
+            if (dragging || drawerOpen || !overlays.isEmpty()) return;
+            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            openWallpaper();
+        };
 
         Root(Context c) { super(c); }
 
@@ -585,6 +798,8 @@ public class MainActivity extends Activity {
 
         void setProgress(float p) {
             progress = Math.max(0f, Math.min(1f, p));
+            boolean half = progress >= 0.5f;
+            if (half == barsDark) { barsDark = !half; updateBars(); }
             if (progress <= 0f) {
                 drawer.setVisibility(View.INVISIBLE);
                 home.setAlpha(1f);
@@ -623,25 +838,22 @@ public class MainActivity extends Activity {
             beginLayers();
             anim = ValueAnimator.ofFloat(progress, target);
             anim.setDuration(dur);
-            anim.setInterpolator(settle);
-            anim.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
-                @Override public void onAnimationUpdate(ValueAnimator a) { setProgress((Float) a.getAnimatedValue()); }
-            });
+            anim.setInterpolator(Ui.EMPHASIZED);
+            anim.addUpdateListener(a -> setProgress((Float) a.getAnimatedValue()));
             anim.addListener(new AnimatorListenerAdapter() {
-                @Override public void onAnimationEnd(Animator a) {
-                    post(new Runnable() { @Override public void run() { endLayers(); } });
-                }
+                @Override public void onAnimationEnd(Animator a) { post(Root.this::endLayers); }
             });
             anim.start();
         }
 
         @Override public boolean onInterceptTouchEvent(MotionEvent ev) {
+            if (!overlays.isEmpty()) return false;
             switch (ev.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     downX = ev.getX(); downY = ev.getY();
                     startProgress = progress;
                     dragging = false;
-                    if (anim != null && anim.isRunning()) { anim.cancel(); }
+                    if (anim != null && anim.isRunning()) anim.cancel();
                     if (vt != null) vt.recycle();
                     vt = VelocityTracker.obtain();
                     vt.addMovement(ev);
@@ -655,12 +867,14 @@ public class MainActivity extends Activity {
         }
 
         private boolean maybeStartDrag(MotionEvent ev) {
+            if (placing != null) return false;
             float dy = ev.getY() - downY, dx = ev.getX() - downX;
             if (Math.abs(dy) > slop && Math.abs(dy) > Math.abs(dx) * 1.2f) {
                 boolean opening = !drawerOpen && dy < 0;
                 boolean closing = drawerOpen && dy > 0 && grid.atTop() && !searching;
                 if (opening || closing) {
                     dragging = true;
+                    removeCallbacks(homeLongPress);
                     downY = ev.getY();
                     startProgress = progress;
                     beginLayers();
@@ -671,19 +885,26 @@ public class MainActivity extends Activity {
         }
 
         @Override public boolean onTouchEvent(MotionEvent ev) {
-            if (vt == null) { vt = VelocityTracker.obtain(); }
+            if (!overlays.isEmpty()) return false;
+            if (vt == null) vt = VelocityTracker.obtain();
             vt.addMovement(ev);
             switch (ev.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     downX = ev.getX(); downY = ev.getY(); startProgress = progress;
                     if (anim != null && anim.isRunning()) anim.cancel();
+                    if (placing != null) { cancelPlacing(); return true; }
+                    if (!drawerOpen && progress == 0f)
+                        postDelayed(homeLongPress, ViewConfiguration.getLongPressTimeout() + 80);
                     return true;
                 case MotionEvent.ACTION_MOVE:
+                    if (!dragging && (Math.abs(ev.getY() - downY) > slop || Math.abs(ev.getX() - downX) > slop))
+                        removeCallbacks(homeLongPress);
                     if (!dragging) maybeStartDrag(ev);
                     if (dragging) setProgress(startProgress + (downY - ev.getY()) / travel());
                     return true;
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
+                    removeCallbacks(homeLongPress);
                     if (dragging) {
                         vt.computeCurrentVelocity(1000);
                         float vy = vt.getYVelocity();
@@ -692,52 +913,13 @@ public class MainActivity extends Activity {
                         else if (vy > 700) target = 0f;
                         else target = progress > 0.5f ? 1f : 0f;
                         dragging = false;
-                        float toward = (target == 1f) ? -vy : vy;
-                        animateTo(target, toward);
+                        animateTo(target, target == 1f ? -vy : vy);
                     }
                     dragging = false;
-                    vt.recycle(); vt = null;
+                    if (vt != null) { vt.recycle(); vt = null; }
                     return true;
             }
             return true;
-        }
-    }
-
-    // ---------------------------------------------------------------- header icons
-
-    static final class HeaderBtn extends View {
-        private final int type;
-        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        HeaderBtn(Context c, int type) {
-            super(c);
-            this.type = type;
-            float d = c.getResources().getDisplayMetrics().density;
-            p.setColor(Color.WHITE);
-            p.setStyle(Paint.Style.STROKE);
-            p.setStrokeWidth(2.2f * d);
-            p.setStrokeCap(Paint.Cap.ROUND);
-            p.setStrokeJoin(Paint.Join.ROUND);
-            p.setShadowLayer(3 * d, 0, d, 0x55000000);
-            setLayerType(LAYER_TYPE_SOFTWARE, null);
-        }
-        @Override protected void onDraw(Canvas c) {
-            float w = getWidth(), h = getHeight(), d = w / 44f;
-            float cx = w / 2, cy = h / 2;
-            if (type == 0) {
-                c.drawCircle(cx - 2 * d, cy - 2 * d, 7.5f * d, p);
-                c.drawLine(cx + 3.5f * d, cy + 3.5f * d, cx + 9 * d, cy + 9 * d, p);
-            } else if (type == 1) {
-                RectF r = new RectF(cx - 8 * d, cy - 4 * d, cx + 8 * d, cy + 10 * d);
-                c.drawRoundRect(r, 3 * d, 3 * d, p);
-                Path hnd = new Path();
-                hnd.moveTo(cx - 4 * d, cy - 4 * d);
-                hnd.cubicTo(cx - 4 * d, cy - 11 * d, cx + 4 * d, cy - 11 * d, cx + 4 * d, cy - 4 * d);
-                c.drawPath(hnd, p);
-            } else {
-                Paint f = new Paint(p);
-                f.setStyle(Paint.Style.FILL);
-                for (int i = -1; i <= 1; i++) c.drawCircle(cx, cy + i * 7 * d, 2f * d, f);
-            }
         }
     }
 }
