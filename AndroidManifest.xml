@@ -22,6 +22,8 @@
 
     <application
         android:label="Fast Launcher"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:allowBackup="false"
         android:hardwareAccelerated="true"
         android:theme="@style/T">
