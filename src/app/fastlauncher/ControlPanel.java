@@ -51,8 +51,7 @@ import java.util.Locale;
  *
  *   header        time, date, settings
  *   tiles         Wi-Fi | Mobile data, Bluetooth | Torch
- *   media         full-width now-playing card (art, progress, controls)
- *   sliders       brightness, volume (true level, with percentages)
+ *   media row     now-playing card (art, progress, controls) | brightness | volume
  *   grid          16 round toggles
  *
  * A floating card in the system's own pop-up colours, following light and dark mode.
@@ -73,7 +72,7 @@ final class ControlPanel extends FrameLayout {
     private final ScrollView scroll;
     private final TextView time, date;
     private final Item wifi, bluetooth, data, torch;
-    private final HSlider brightness, volume;
+    private final VSlider brightness, volume;
     private final Round hotspot, rotate, plane, location, dark, dnd, sound, eye,
             saver, screenshot, record, cast, calc, recorder, lock, power;
 
@@ -167,7 +166,11 @@ final class ControlPanel extends FrameLayout {
         data.setOnClickListener(v -> open(new Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)));
         torch.setOnClickListener(v -> safe(this::toggleTorch));
 
-        // ---- media: a full card when something plays, a slim row otherwise
+        // ---- media (half the width) beside the two sliders, all in one row
+        LinearLayout mediaRow = new LinearLayout(c);
+        FrameLayout media = new FrameLayout(c);
+        mediaRow.addView(media, new LinearLayout.LayoutParams(0, -1, 2f));
+
         mediaFull = new FrameLayout(c);
         mediaFull.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 24)));
         mediaFull.setClipToOutline(true);
@@ -175,71 +178,74 @@ final class ControlPanel extends FrameLayout {
         mediaArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
         mediaFull.addView(mediaArt, new LayoutParams(-1, -1));
         View shade = new View(c);
-        shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
-                new int[]{0xE6000000, 0xA6000000, 0x40000000}));
+        shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0xC7000000, 0x80000000, 0xD9000000}));
         mediaFull.addView(shade, new LayoutParams(-1, -1));
         LinearLayout mcol = new LinearLayout(c);
         mcol.setOrientation(LinearLayout.VERTICAL);
-        mcol.setPadding(Ui.dpi(c, 18), Ui.dpi(c, 16), Ui.dpi(c, 16), Ui.dpi(c, 12));
+        mcol.setPadding(Ui.dpi(c, 14), Ui.dpi(c, 13), Ui.dpi(c, 14), Ui.dpi(c, 8));
         mediaFull.addView(mcol, new LayoutParams(-1, -1));
-        mediaTitle = Ui.text(c, "", 18, Color.WHITE, true);
+        mediaTitle = Ui.text(c, "", 14.5f, Color.WHITE, true);
         mediaTitle.setTypeface(Ui.font(c, 650));
         mediaTitle.setMaxLines(2);
         mediaTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        mediaArtist = Ui.text(c, "", 13.5f, 0xCCFFFFFF, false);
+        mediaArtist = Ui.text(c, "", 12, 0xCCFFFFFF, false);
         mediaArtist.setSingleLine(true);
         mediaArtist.setEllipsize(android.text.TextUtils.TruncateAt.END);
         mcol.addView(mediaTitle, Ui.lp(-1, -2));
-        mcol.addView(mediaArtist, Ui.lp(-1, -2, Ui.dpi(c, 4)));
+        mcol.addView(mediaArtist, Ui.lp(-1, -2, Ui.dpi(c, 2)));
         mcol.addView(new View(c), new LinearLayout.LayoutParams(1, 0, 1f));
         mediaBar = new Progress(c);
-        mcol.addView(mediaBar, Ui.lp(-1, Ui.dpi(c, 4)));
+        mcol.addView(mediaBar, Ui.lp(-1, Ui.dpi(c, 3)));
         LinearLayout times = new LinearLayout(c);
-        mediaTime = Ui.text(c, "", 11.5f, 0xB3FFFFFF, false);
-        mediaLeft = Ui.text(c, "", 11.5f, 0xB3FFFFFF, false);
+        mediaTime = Ui.text(c, "", 10.5f, 0xB3FFFFFF, false);
+        mediaLeft = Ui.text(c, "", 10.5f, 0xB3FFFFFF, false);
         times.addView(mediaTime, new LinearLayout.LayoutParams(0, -2, 1f));
         times.addView(mediaLeft);
-        mcol.addView(times, Ui.lp(-1, -2, Ui.dpi(c, 5)));
+        mcol.addView(times, Ui.lp(-1, -2, Ui.dpi(c, 4)));
         LinearLayout controls = new LinearLayout(c);
         controls.setGravity(Gravity.CENTER);
         controls.addView(mediaButton(c, PanelIcons.PREV, false, () -> { if (controller != null) controller.getTransportControls().skipToPrevious(); }),
-                Ui.lp(Ui.dpi(c, 52), Ui.dpi(c, 52)));
+                Ui.lp(Ui.dpi(c, 40), Ui.dpi(c, 40)));
         mediaPlay = mediaButton(c, PanelIcons.PLAY, true, this::togglePlay);
-        LinearLayout.LayoutParams pp = Ui.lp(Ui.dpi(c, 54), Ui.dpi(c, 54));
-        pp.leftMargin = pp.rightMargin = Ui.dpi(c, 22);
+        LinearLayout.LayoutParams pp = Ui.lp(Ui.dpi(c, 46), Ui.dpi(c, 46));
+        pp.leftMargin = pp.rightMargin = Ui.dpi(c, 8);
         controls.addView(mediaPlay, pp);
         controls.addView(mediaButton(c, PanelIcons.NEXT, false, () -> { if (controller != null) controller.getTransportControls().skipToNext(); }),
-                Ui.lp(Ui.dpi(c, 52), Ui.dpi(c, 52)));
+                Ui.lp(Ui.dpi(c, 40), Ui.dpi(c, 40)));
         mcol.addView(controls, Ui.lp(-1, -2, Ui.dpi(c, 4)));
         mediaFull.setVisibility(GONE);
-        body.addView(mediaFull, Ui.lp(-1, Ui.dpi(c, 196), Ui.dpi(c, 10)));
+        media.addView(mediaFull, new LayoutParams(-1, -1));
 
         mediaEmpty = new LinearLayout(c);
-        mediaEmpty.setGravity(Gravity.CENTER_VERTICAL);
+        mediaEmpty.setOrientation(LinearLayout.VERTICAL);
+        mediaEmpty.setGravity(Gravity.CENTER);
         mediaEmpty.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 24)));
-        mediaEmpty.setPadding(Ui.dpi(c, 10), 0, Ui.dpi(c, 14), 0);
+        mediaEmpty.setPadding(Ui.dpi(c, 14), 0, Ui.dpi(c, 14), 0);
         PanelIcons note = new PanelIcons(c, PanelIcons.PLAY, Ui.FG2);
-        int np = Ui.dpi(c, 12);
+        int np = Ui.dpi(c, 13);
         note.setPadding(np, np, np, np);
-        note.setBackground(Ui.round(Ui.ICON_BG, Ui.dp(c, 21)));
-        mediaEmpty.addView(note, Ui.lp(Ui.dpi(c, 42), Ui.dpi(c, 42)));
-        LinearLayout et = new LinearLayout(c);
-        et.setOrientation(LinearLayout.VERTICAL);
-        et.setPadding(Ui.dpi(c, 12), 0, 0, 0);
-        TextView e1 = Ui.text(c, "Nothing playing", 14.5f, Ui.FG, true);
+        note.setBackground(Ui.round(Ui.ICON_BG, Ui.dp(c, 23)));
+        mediaEmpty.addView(note, Ui.lp(Ui.dpi(c, 46), Ui.dpi(c, 46)));
+        TextView e1 = Ui.text(c, "Nothing playing", 14, Ui.FG, true);
         e1.setTypeface(Ui.font(c, 600));
-        et.addView(e1);
-        et.addView(Ui.text(c, "Music and videos you play show up here", 12, Ui.FG2, false), Ui.lp(-2, -2, Ui.dpi(c, 3)));
-        mediaEmpty.addView(et, new LinearLayout.LayoutParams(0, -2, 1f));
-        body.addView(mediaEmpty, Ui.lp(-1, Ui.dpi(c, 62), Ui.dpi(c, 10)));
+        mediaEmpty.addView(e1, Ui.lp(-2, -2, Ui.dpi(c, 10)));
+        TextView e2 = Ui.text(c, "Music and videos show up here", 11.5f, Ui.FG2, false);
+        e2.setGravity(Gravity.CENTER);
+        mediaEmpty.addView(e2, Ui.lp(-2, -2, Ui.dpi(c, 3)));
+        media.addView(mediaEmpty, new LayoutParams(-1, -1));
 
-        // ---- sliders
-        brightness = new HSlider(c, PanelIcons.SUN);
-        volume = new HSlider(c, PanelIcons.SPEAKER);
-        body.addView(brightness, Ui.lp(-1, Ui.dpi(c, 52), Ui.dpi(c, 10)));
-        body.addView(volume, Ui.lp(-1, Ui.dpi(c, 52), Ui.dpi(c, 8)));
+        brightness = new VSlider(c, PanelIcons.SUN);
+        volume = new VSlider(c, PanelIcons.SPEAKER);
+        LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(0, -1, 1f);
+        bl.leftMargin = Ui.dpi(c, 8);
+        mediaRow.addView(brightness, bl);
+        LinearLayout.LayoutParams vl = new LinearLayout.LayoutParams(0, -1, 1f);
+        vl.leftMargin = Ui.dpi(c, 8);
+        mediaRow.addView(volume, vl);
         brightness.listener = (v, d) -> safe(() -> setBrightness(v, d));
         volume.listener = (v, d) -> safe(() -> setVolume(v, d));
+        body.addView(mediaRow, Ui.lp(-1, Ui.dpi(c, 168), Ui.dpi(c, 10)));
 
         // ---- the grid
         hotspot = new Round(c, PanelIcons.HOTSPOT, "Hotspot");
@@ -626,8 +632,29 @@ final class ControlPanel extends FrameLayout {
     }
 
     private static Bitmap fit(Bitmap b, int maxW) {
+        b = trimBars(b);
         if (b.getWidth() <= maxW) return b;
         return Bitmap.createScaledBitmap(b, maxW, Math.max(1, Math.round(b.getHeight() * (maxW / (float) b.getWidth()))), true);
+    }
+
+    /** Video thumbnails often come letterboxed; cut the black bars so the art fills the card. */
+    private static Bitmap trimBars(Bitmap b) {
+        if (b.getConfig() == Bitmap.Config.HARDWARE) return b;
+        int w = b.getWidth(), h = b.getHeight(), top = 0, bottom = h;
+        int[] row = new int[w];
+        while (top < h / 3 && dark(b, row, top)) top++;
+        while (bottom > h * 2 / 3 && dark(b, row, bottom - 1)) bottom--;
+        if (top == 0 && bottom == h) return b;
+        return Bitmap.createBitmap(b, 0, top, w, bottom - top);
+    }
+
+    private static boolean dark(Bitmap b, int[] row, int y) {
+        b.getPixels(row, 0, row.length, 0, y, row.length, 1);
+        for (int i = 0; i < row.length; i += 8) {
+            int p = row[i];
+            if (((p >> 16) & 0xFF) > 24 || ((p >> 8) & 0xFF) > 24 || (p & 0xFF) > 24) return false;
+        }
+        return true;
     }
 
     private static String clock(long ms) {
@@ -862,15 +889,15 @@ final class ControlPanel extends FrameLayout {
     }
 
     /**
-     * A wide slider whose fill is exactly the value (0% empty, 100% full), icon on the left and
-     * the percentage on the right. Drag sideways, relative to where you started; tap to jump.
+     * A tall slider whose fill is exactly the value (0% empty, 100% full), percentage at the top and
+     * icon at the bottom. Drag up or down, relative to where you started; tap to jump.
      */
-    static final class HSlider extends FrameLayout {
+    static final class VSlider extends FrameLayout {
         interface Change { void onChange(float value, boolean done); }
 
         Change listener;
         private float value;
-        private float downX, startValue;
+        private float downY, startValue;
         private boolean moving;
         private final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -879,30 +906,33 @@ final class ControlPanel extends FrameLayout {
         private final PanelIcons icon;
         private final float iconSize;
 
-        HSlider(Context c, int type) {
+        VSlider(Context c, int type) {
             super(c);
             setWillNotDraw(false);
             track.setColor(Ui.GROUP);
             fill.setColor(Ui.STRONG);
-            pct.setTextAlign(Paint.Align.RIGHT);
+            pct.setTextAlign(Paint.Align.CENTER);
             pct.setTypeface(Ui.font(c, 600));
-            pct.setTextSize(Ui.dp(c, 13.5f));
+            pct.setTextSize(Ui.dp(c, 13));
             iconSize = Ui.dp(c, 52);
             icon = new PanelIcons(c, type, Ui.FG);
             int p = Ui.dpi(c, 15);
             icon.setPadding(p, p, p, p);
-            addView(icon, new LayoutParams(Math.round(iconSize), Math.round(iconSize), Gravity.START | Gravity.CENTER_VERTICAL));
+            LayoutParams ip = new LayoutParams(Math.round(iconSize), Math.round(iconSize), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+            ip.bottomMargin = Ui.dpi(c, 4);
+            addView(icon, ip);
         }
 
         void setValue(float v) {
             value = Math.max(0f, Math.min(1f, v));
-            icon.setColor(value * getWidth() > iconSize * 0.55f ? Ui.ON_STRONG : Ui.FG);
+            icon.setColor(value * getHeight() > iconSize * 0.6f ? Ui.ON_STRONG : Ui.FG);
             invalidate();
         }
 
         @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
             clip.reset();
-            clip.addRoundRect(0, 0, w, h, h / 2f, h / 2f, android.graphics.Path.Direction.CW);
+            float r = Ui.dp(getContext(), 24);
+            clip.addRoundRect(0, 0, w, h, r, r, android.graphics.Path.Direction.CW);
             setValue(value);
         }
 
@@ -911,33 +941,31 @@ final class ControlPanel extends FrameLayout {
             int save = c.save();
             c.clipPath(clip);
             c.drawRect(0, 0, w, h, track);
-            float x = w * value;
-            c.drawRect(0, 0, x, h, fill);
+            float top = h * (1f - value);
+            c.drawRect(0, top, w, h, fill);
             c.restoreToCount(save);
-            float right = w - Ui.dp(getContext(), 18);
-            pct.setColor(x > right - Ui.dp(getContext(), 8) ? Ui.ON_STRONG : Ui.FG2);
-            c.drawText(Math.round(value * 100) + "%", right, h / 2f + pct.getTextSize() * 0.36f, pct);
+            float base = Ui.dp(getContext(), 26);
+            pct.setColor(top < base - pct.getTextSize() * 0.5f ? Ui.ON_STRONG : Ui.FG2);
+            c.drawText(Math.round(value * 100) + "%", w / 2f, base, pct);
         }
 
         @Override public boolean onTouchEvent(MotionEvent e) {
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
-                    downX = e.getX();
+                    downY = e.getY();
                     startValue = value;
                     moving = false;
+                    getParent().requestDisallowInterceptTouchEvent(true); // vertical drags belong to the slider
                     return true;
                 case MotionEvent.ACTION_MOVE:
-                    if (!moving && Math.abs(e.getX() - downX) > ViewConfiguration.get(getContext()).getScaledTouchSlop()) {
-                        moving = true;
-                        getParent().requestDisallowInterceptTouchEvent(true);
-                    }
+                    if (!moving && Math.abs(e.getY() - downY) > ViewConfiguration.get(getContext()).getScaledTouchSlop()) moving = true;
                     if (moving) {
-                        setValue(startValue + (e.getX() - downX) / Math.max(1, getWidth()));
+                        setValue(startValue - (e.getY() - downY) / Math.max(1, getHeight()));
                         if (listener != null) listener.onChange(value, false);
                     }
                     return true;
                 case MotionEvent.ACTION_UP:
-                    if (!moving) setValue(e.getX() / Math.max(1, getWidth())); // tap jumps to that level
+                    if (!moving) setValue(1f - e.getY() / Math.max(1, getHeight())); // tap jumps to that level
                     if (listener != null) listener.onChange(value, true);
                     performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
                     return true;

@@ -21,7 +21,7 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
 - **Swipe down on home** opens the notification shade.
 - **Control panel, from any app**: swipe down from the right half of the status bar (needs the
   "Fast Launcher controls" accessibility service, which reads no screen content). Wi-Fi, Mobile data,
-  Bluetooth and Torch tiles; a full-width now-playing card (album art, live progress, big controls); brightness and volume sliders that show the real level; and a
+  Bluetooth and Torch tiles; a now-playing card (album art, live progress, controls) beside tall brightness and volume sliders that show the real level; and a
   grid with Hotspot, Auto-rotate, Aeroplane, Location, Dark mode, Do not disturb, Sound mode, Eye
   comfort, Battery saver, Screenshot, Screen record, Cast, Calculator, Recorder, Lock and Power.
   Controls Android lets apps change are switched in place; the rest open their exact system page.
