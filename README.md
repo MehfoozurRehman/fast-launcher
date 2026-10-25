@@ -6,7 +6,8 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
 ## What it does
 - **Home**: big clock and date (tap for alarms / calendar), two-row dock with notification badges.
 - **Drawer**: swipe up; follows your finger, settles with velocity. Search launches the top hit on Enter.
-- **Icons**: one house shape, a superellipse "squircle" with a baked soft shadow and rim light.
+- **Icons**: pebbles. Each app sits on a white organic blob plate, with its own artwork set into an
+  echo of that shape. Every app gets a gentle variation seeded from its name. Shadows are baked in.
   Real adaptive icons are used even on Honor, whose icon theme normally swaps them for pre-shaped bitmaps
   (see `Icons.raw`: adaptive icons are inflated from their XML, bitmap icons decoded from raw PNG bytes).
 - **Long-press an app**: anchored menu with Add to dock (tap the dashed slot you want), App info, Uninstall.

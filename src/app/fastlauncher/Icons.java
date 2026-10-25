@@ -25,31 +25,53 @@ import java.security.MessageDigest;
 import java.util.Set;
 
 /**
- * Renders every app icon into one house shape: a superellipse ("squircle") with continuous
- * curvature, a baked soft shadow and a faint rim light. Everything is baked into the bitmap,
- * so drawing an icon at runtime is a single drawBitmap.
+ * Renders every app icon as a pebble: a white organic blob plate with the app's own artwork
+ * set into a smaller, slightly turned blob inside it. Each app gets its own gentle variation
+ * of the shape, seeded from its name, so the grid feels hand-made but stays calm.
+ * Shadows and all are baked into the bitmap, so drawing an icon is a single drawBitmap.
  */
 final class Icons {
 
     /** Bump when the look changes so cached PNGs are re-rendered. */
-    private static final int VERSION = 5;
-    private static final float EXPONENT = 5f; // 2 = ellipse, higher = squarer
+    private static final int VERSION = 7;
+    private static final float INNER = 0.72f; // artwork blob radius relative to the plate
 
     private Icons() {}
 
     /** Shadow + rim padding around the shape, in px. */
     static int pad(Context c) { return Math.round(4 * c.getResources().getDisplayMetrics().density); }
 
-    static Path squircle(float left, float top, float size) {
+    /**
+     * A smooth closed blob: a circle whose radius is nudged by a few low-frequency sine
+     * lobes. Normalised so its widest point touches radius r.
+     */
+    static Path blob(float cx, float cy, float r, long seed, float turn) {
+        java.util.Random rnd = new java.util.Random(seed);
+        double p2 = rnd.nextDouble() * Math.PI * 2, p3 = rnd.nextDouble() * Math.PI * 2, p5 = rnd.nextDouble() * Math.PI * 2;
+        double a2 = 0.026 + rnd.nextDouble() * 0.020; // oval-ness
+        double a3 = 0.028 + rnd.nextDouble() * 0.020; // three soft lobes: the pebble look
+        double a5 = 0.008 + rnd.nextDouble() * 0.010; // a little wobble
+        int n = 180;
+        float[] xs = new float[n], ys = new float[n];
+        double max = 0;
+        double[] rad = new double[n];
+        for (int i = 0; i < n; i++) {
+            double t = 2 * Math.PI * i / n + turn;
+            rad[i] = 1 + a2 * Math.sin(2 * t + p2) + a3 * Math.sin(3 * t + p3) + a5 * Math.sin(5 * t + p5);
+            max = Math.max(max, rad[i]);
+        }
+        for (int i = 0; i < n; i++) {
+            double t = 2 * Math.PI * i / n;
+            float rr = (float) (r * rad[i] / max);
+            xs[i] = cx + rr * (float) Math.cos(t);
+            ys[i] = cy + rr * (float) Math.sin(t);
+        }
+        // quadratic smoothing through midpoints: no visible facets at any size
         Path p = new Path();
-        float r = size / 2f, cx = left + r, cy = top + r;
-        int steps = 96;
-        for (int i = 0; i <= steps; i++) {
-            double t = 2 * Math.PI * i / steps;
-            double c = Math.cos(t), s = Math.sin(t);
-            float x = (float) (cx + r * Math.signum(c) * Math.pow(Math.abs(c), 2 / EXPONENT));
-            float y = (float) (cy + r * Math.signum(s) * Math.pow(Math.abs(s), 2 / EXPONENT));
-            if (i == 0) p.moveTo(x, y); else p.lineTo(x, y);
+        p.moveTo((xs[n - 1] + xs[0]) / 2f, (ys[n - 1] + ys[0]) / 2f);
+        for (int i = 0; i < n; i++) {
+            int j = (i + 1) % n;
+            p.quadTo(xs[i], ys[i], (xs[i] + xs[j]) / 2f, (ys[i] + ys[j]) / 2f);
         }
         p.close();
         return p;
@@ -142,39 +164,61 @@ final class Icons {
         if (d == null) {
             try { d = ai.loadIcon(pm); } catch (Throwable t) { return null; }
         }
-        Bitmap content;
-        try { content = content(d, size); } catch (Throwable t) { return null; }
-
         float density = c.getResources().getDisplayMetrics().density;
         int pad = pad(c);
         int full = size + pad * 2;
+        float cx = full / 2f, cy = full / 2f, plateR = size / 2f;
+        long seed = (ai.packageName + "/" + ai.name).hashCode();
+
+        float innerR = plateR * INNER;
+        int inner = Math.round(innerR * 2);
+        Bitmap content;
+        try { content = content(d, inner); } catch (Throwable t) { return null; }
+
         Bitmap out = Bitmap.createBitmap(full, full, Bitmap.Config.ARGB_8888);
         Canvas cv = new Canvas(out);
-        Path shape = squircle(pad, pad, size);
 
+        // the white plate, with a soft drop shadow
+        Path plate = blob(cx, cy, plateR - density * 0.5f, seed, 0f);
         Paint shadow = new Paint(Paint.ANTI_ALIAS_FLAG);
         shadow.setColor(Color.WHITE);
-        shadow.setShadowLayer(2.6f * density, 0, 1.2f * density, 0x3A000000);
-        cv.drawPath(shape, shadow);
+        shadow.setShadowLayer(2.8f * density, 0, 1.3f * density, 0x3D000000);
+        cv.drawPath(plate, shadow);
+        Paint plateFill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        plateFill.setShader(new LinearGradient(0, cy - plateR, 0, cy + plateR,
+                0xFFFFFFFF, 0xFFEDEFF3, Shader.TileMode.CLAMP));
+        cv.drawPath(plate, plateFill);
+        // a hair of shade along the plate's lower edge, so it reads as a raised pebble
+        Paint edge = new Paint(Paint.ANTI_ALIAS_FLAG);
+        edge.setStyle(Paint.Style.STROKE);
+        edge.setStrokeWidth(0.9f * density);
+        edge.setShader(new LinearGradient(0, cy - plateR, 0, cy + plateR,
+                new int[]{0x00000000, 0x00000000, 0x1C000000}, new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
+        cv.drawPath(plate, edge);
 
+        // the artwork, set into an echo of the plate's shape, a little turned, so the white
+        // rim stays even all the way round while still feeling hand-placed
+        Path art = blob(cx, cy, innerR, seed, 0.22f);
+        Paint lift = new Paint(Paint.ANTI_ALIAS_FLAG);
+        lift.setColor(Color.WHITE);
+        lift.setShadowLayer(1.8f * density, 0, 0.9f * density, 0x33000000);
+        cv.drawPath(art, lift);
         Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
         BitmapShader bs = new BitmapShader(content, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
         Matrix m = new Matrix();
-        m.setTranslate(pad, pad);
+        m.setTranslate(cx - inner / 2f, cy - inner / 2f);
         bs.setLocalMatrix(m);
         fill.setShader(bs);
-        cv.drawPath(shape, fill);
+        cv.drawPath(art, fill);
         content.recycle();
 
-        // rim light: bright along the top edge, a hair of shade along the bottom
+        // faint top highlight on the artwork
         Paint rim = new Paint(Paint.ANTI_ALIAS_FLAG);
         rim.setStyle(Paint.Style.STROKE);
-        rim.setStrokeWidth(1f * density);
-        rim.setShader(new LinearGradient(0, pad, 0, pad + size,
-                new int[]{0x66FFFFFF, 0x00FFFFFF, 0x00000000, 0x1A000000},
-                new float[]{0f, 0.35f, 0.7f, 1f}, Shader.TileMode.CLAMP));
-        Path inner = squircle(pad + 0.5f * density, pad + 0.5f * density, size - density);
-        cv.drawPath(inner, rim);
+        rim.setStrokeWidth(0.9f * density);
+        rim.setShader(new LinearGradient(0, cy - innerR, 0, cy + innerR,
+                new int[]{0x59FFFFFF, 0x00FFFFFF}, new float[]{0f, 0.45f}, Shader.TileMode.CLAMP));
+        cv.drawPath(art, rim);
         return out;
     }
 

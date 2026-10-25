@@ -217,7 +217,7 @@ final class AppGridView extends View {
                     iconPaint.setAlpha(slots ? 150 : 255);
                     canvas.drawBitmap(b, cx - b.getWidth() / 2f, top - pad, iconPaint);
                     Integer cnt = e.cn == null ? null : notifs.get(e.cn.getPackageName());
-                    if (cnt != null && !slots) drawBadge(canvas, cx + iconSize / 2f - badgeR * 0.45f, top + badgeR * 0.45f, cnt);
+                    if (cnt != null && !slots) drawBadge(canvas, cx + iconSize * 0.36f, top + iconSize * 0.12f, cnt);
                 }
                 if (labels && e.drawLabel != null) {
                     canvas.drawText(e.drawLabel, cx, top + iconSize + labelGap + textPaint.getTextSize(), textPaint);

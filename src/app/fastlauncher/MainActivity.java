@@ -96,7 +96,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
         dp = getResources().getDisplayMetrics().density;
-        iconPx = Math.round(44 * dp);
+        iconPx = Math.round(48 * dp);
         prefs = getSharedPreferences("launcher", MODE_PRIVATE);
 
         root = new Root(this);
@@ -203,7 +203,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         return t;
     }
 
-    static AppGridView makeDock(Context c) { return new AppGridView(c, 5, 17, 90, 44, 10, 0, false, false); }
+    static AppGridView makeDock(Context c) { return new AppGridView(c, 5, 17, 90, 48, 8, 0, false, false); }
 
     static String clockText(Calendar c) {
         int h = c.get(Calendar.HOUR);
@@ -271,7 +271,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         drawer.setVisibility(View.INVISIBLE);
         root.addView(drawer, new FrameLayout.LayoutParams(-1, -1));
 
-        grid = new AppGridView(this, 5, 17, 97, 44, 12, 12, true, true);
+        grid = new AppGridView(this, 5, 17, 97, 48, 12, 12, true, true);
         grid.setListener(new AppGridView.Listener() {
             @Override public void onTap(AppGridView.AppEntry e, int index) { launch(e, grid, index); }
             @Override public void onLongPress(AppGridView.AppEntry e, int index, float cx, float cy) {
