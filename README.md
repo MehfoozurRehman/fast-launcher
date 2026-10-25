@@ -24,6 +24,8 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
 - **Notifications, from any app**: swipe down from the left side of the status bar. Tap one to open it,
   swipe it right to dismiss, or Clear all. Swipe sideways to move between notifications and controls;
   a swipe from the screen edge (the back gesture) closes the panel.
+  Ongoing ones (USB mode, charging, downloads) are listed first and can be tapped but not dismissed;
+  **System notifications** at the bottom opens the phone's own shade.
 - **Control panel, from any app**: swipe down from the right half of the status bar (needs the
   "Fast Launcher controls" accessibility service, which reads no screen content). Wi-Fi, Mobile data,
   Bluetooth and Torch tiles; a now-playing card (album art, live progress you can drag to seek, controls; tap it to open the player) beside tall brightness and volume sliders that show the real level; and a
@@ -55,3 +57,33 @@ This builds, installs, sets the app as the home app and opens it. A signing key 
 first build (`debug.keystore`, not committed). Keep a copy of it: updates must be signed with the same key,
 otherwise Android requires an uninstall (which loses the dock, hidden apps and notification access). Notification badges need notification access for
 "Fast Launcher badges" (Settings > Notification access).
+
+One-time grants over adb (they survive restarts and updates):
+
+```bash
+adb shell pm grant app.fastlauncher android.permission.WRITE_SECURE_SETTINGS
+```
+
+```bash
+adb shell dumpsys deviceidle whitelist +app.fastlauncher
+```
+
+The first lets the launcher switch its panel service back on if Android turns it off (a force-stop,
+for example by a phone cleaner, does that). The second keeps battery saving from putting it to sleep.
+
+## If something goes wrong
+- **Report a problem** is at the bottom of the wallpaper sheet (long-press the home screen). It shares a
+  plain-text report: the installed version (`1.<n>-<commit>`), a checklist of what's switched on, the
+  launcher's own log of crashes and warnings, and its recent system log. Send it to yourself and paste it
+  into an issue or a chat.
+- With the phone connected, the same report as a file:
+
+```bash
+adb shell am broadcast -a app.fastlauncher.DEBUG --es debug report -p app.fastlauncher
+```
+
+```bash
+adb shell cat /sdcard/Android/data/app.fastlauncher/files/report.txt
+```
+
+- If Honor's launcher ever takes over as home: Settings > Apps > Default apps > Home app > Fast Launcher.

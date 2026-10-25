@@ -236,6 +236,10 @@ final class ControlPanel extends FrameLayout {
         notifEmpty = Ui.text(c, "No notifications", 14, Ui.FG2, false);
         notifEmpty.setGravity(Gravity.CENTER);
         npage.addView(notifEmpty, Ui.lp(-1, Ui.dpi(c, 120)));
+        // always a way into the system's own shade (anything this page can't show or do)
+        npage.addView(pill(c, "System notifications", () -> closeThen(200,
+                () -> host.globalAction(AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS))),
+                Ui.lp(-1, Ui.dpi(c, 44), Ui.dpi(c, 10)));
         notifScroll.addView(npage);
         notifScroll.setVisibility(GONE);
         pager.addView(notifScroll, new LayoutParams(-1, -2));
@@ -1133,7 +1137,8 @@ final class ControlPanel extends FrameLayout {
             col.addView(b, Ui.lp(-1, -2, Ui.dpi(c, 2)));
         }
         row.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
-        row.dismissable = (n.flags & android.app.Notification.FLAG_NO_CLEAR) == 0;
+        // ongoing ones (USB mode, charging, a download) stay put, like in the system shade
+        row.dismissable = (n.flags & (android.app.Notification.FLAG_NO_CLEAR | android.app.Notification.FLAG_ONGOING_EVENT)) == 0;
         return row;
     }
 

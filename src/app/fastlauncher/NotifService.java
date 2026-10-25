@@ -23,7 +23,7 @@ public class NotifService extends NotificationListenerService {
     interface Changed { void onNotifCountsChanged(); }
 
     static volatile Map<String, Integer> counts = new HashMap<>();
-    /** Dismissable notifications, newest first (no group summaries, media, or ongoing ones). */
+    /** What the panel lists: ongoing ones first, then newest first (no media, no covered group summaries). */
     static volatile List<StatusBarNotification> list = new ArrayList<>();
     static Changed listener;
     static Runnable panelListener;
@@ -60,9 +60,11 @@ public class NotifService extends NotificationListenerService {
                 }
                 for (StatusBarNotification s : active) {
                     Notification n = s.getNotification();
-                    if ((n.flags & Notification.FLAG_ONGOING_EVENT) != 0) continue;
+                    boolean ongoing = (n.flags & Notification.FLAG_ONGOING_EVENT) != 0;
                     boolean summary = (n.flags & Notification.FLAG_GROUP_SUMMARY) != 0;
-                    if (!summary) {
+                    // badges count only real messages; the panel also lists ongoing ones (USB mode,
+                    // charging, downloads...), since our pull-down replaces the system shade
+                    if (!summary && !ongoing) {
                         String pkg = s.getPackageName();
                         Integer c = next.get(pkg);
                         next.put(pkg, c == null ? 1 : c + 1);
@@ -72,7 +74,13 @@ public class NotifService extends NotificationListenerService {
                     if (getPackageName().equals(s.getPackageName())) continue;
                     shown.add(s);
                 }
-                Collections.sort(shown, (a, b) -> Long.compare(b.getPostTime(), a.getPostTime()));
+                // ongoing ones first (like the system shade), then newest first
+                Collections.sort(shown, (a, b) -> {
+                    boolean oa = (a.getNotification().flags & Notification.FLAG_ONGOING_EVENT) != 0;
+                    boolean ob = (b.getNotification().flags & Notification.FLAG_ONGOING_EVENT) != 0;
+                    if (oa != ob) return oa ? -1 : 1;
+                    return Long.compare(b.getPostTime(), a.getPostTime());
+                });
             }
         } catch (Exception ignored) {}
         main.post(new Runnable() {
