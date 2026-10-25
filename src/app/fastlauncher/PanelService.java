@@ -32,7 +32,16 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
     private boolean panelOpen;
     private int statusH;
 
+    /** The connected service, so the launcher can lock the screen (double-tap on home). */
+    static PanelService running;
+
+    static boolean lockScreen() {
+        PanelService s = running;
+        return s != null && s.performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN);
+    }
+
     @Override protected void onServiceConnected() {
+        running = this;
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
         statusH = id > 0 ? getResources().getDimensionPixelSize(id) : Ui.dpi(this, 32);
@@ -71,6 +80,7 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
     }
 
     @Override public void onDestroy() {
+        if (running == this) running = null;
         try { unregisterReceiver(screen); } catch (Exception ignored) {}
         removeStrip();
         if (panel != null) {
@@ -87,7 +97,7 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
         strip = new Strip(this);
         int w = getResources().getDisplayMetrics().widthPixels;
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
-                Math.round(w * 0.55f), statusH,
+                w, statusH,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
@@ -105,7 +115,21 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
         strip = null;
     }
 
-    /** Swipe down on it to pull the panel; the same touch stream keeps driving the panel. */
+    /** Opens the notifications page from the launcher (swipe down on home). */
+    static boolean openNotifications() {
+        PanelService s = running;
+        if (s == null) return false;
+        s.ensurePanel();
+        if (!s.panelOpen) s.panel.refresh(true);
+        s.showPanel();
+        s.panel.animateTo(1f, 0f);
+        return true;
+    }
+
+    /**
+     * Swipe down on it to pull the panel; the same touch stream keeps driving the panel.
+     * It spans the status bar: the left side opens notifications, the right side the controls.
+     */
     private final class Strip extends View {
         private float downY;
         private boolean pulling;
@@ -124,7 +148,7 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
                     // read every control's state now, while the finger hasn't moved yet: this
                     // frame draws nothing visible, so the panel's first visible frame is cheap
                     ensurePanel();
-                    if (!panelOpen) panel.refresh();
+                    if (!panelOpen) panel.refresh(e.getRawX() < getWidth() * 0.45f);
                     return true;
                 case MotionEvent.ACTION_MOVE: {
                     float dy = e.getRawY() - downY;

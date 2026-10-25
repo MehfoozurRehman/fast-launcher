@@ -18,7 +18,10 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
 - **Long-press an app**: a card with the app's own shortcuts (round icons, e.g. recent WhatsApp chats),
   round Info / Hide / Uninstall buttons and Add to dock (tap the dashed slot you want). Hidden apps
   collect behind a pill at the bottom of the drawer.
-- **Swipe down on home** opens the notification shade.
+- **Swipe down on home** opens the notifications page; **double-tap** empty space to lock the phone.
+- **Under the date**: the next alarm and calendar event when they fall within the coming day.
+- **Notifications, from any app**: swipe down from the left side of the status bar. Tap one to open it,
+  swipe it sideways to dismiss, or Clear all. The bell in the panel's header switches between pages.
 - **Control panel, from any app**: swipe down from the right half of the status bar (needs the
   "Fast Launcher controls" accessibility service, which reads no screen content). Wi-Fi, Mobile data,
   Bluetooth and Torch tiles; a now-playing card (album art, live progress, controls) beside tall brightness and volume sliders that show the real level; and a

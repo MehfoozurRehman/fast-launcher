@@ -75,6 +75,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private View topScrim;
     private BlurView blurView, coverView;
     private LinearLayout dateRow, weatherChip;
+    private TextView agenda;
     private Weather.Glyph weatherGlyph;
     private TextView weatherText;
     private boolean weatherLoading, coverPending;
@@ -359,6 +360,21 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         weatherChip.setVisibility(View.GONE);
         dateRow.addView(weatherChip);
 
+        agenda = makeDate(this);
+        agenda.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+        agenda.setTypeface(Ui.font(this, 550));
+        agenda.setSingleLine(true);
+        agenda.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        agenda.setPadding(dpi(12), dpi(4), dpi(12), dpi(4));
+        agenda.setVisibility(View.GONE);
+        agenda.setOnClickListener(v -> startSafely(agendaHasEvent
+                ? Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALENDAR)
+                : new Intent(AlarmClock.ACTION_SHOW_ALARMS), v));
+        Ui.pressable(agenda);
+        FrameLayout.LayoutParams ap = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        ap.leftMargin = ap.rightMargin = dpi(24);
+        home.addView(agenda, ap);
+
         dock = makeDock(this);
         dock.setListener(new AppGridView.Listener() {
             @Override public void onTap(AppGridView.AppEntry e, int index) {
@@ -380,10 +396,23 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             clock.setText(clockText(c));
             date.setText(dateText(c));
             if (Weather.stale(MainActivity.this)) refreshWeather();
+            refreshAgenda();
             long now = System.currentTimeMillis();
             clock.postDelayed(this, 60000 - (now % 60000) + 50);
         }
     };
+
+    private boolean agendaHasEvent;
+
+    private void refreshAgenda() {
+        Agenda.load(this, (text, hasEvent) -> {
+            if (isDestroyed()) return;
+            agendaHasEvent = hasEvent;
+            if (!android.text.TextUtils.equals(agenda.getText(), text)) agenda.setText(text);
+            int vis = text.isEmpty() ? View.GONE : View.VISIBLE;
+            if (agenda.getVisibility() != vis) agenda.setVisibility(vis);
+        });
+    }
 
     private void buildDrawer() {
         blurView = new BlurView(this);
@@ -434,6 +463,9 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         FrameLayout.LayoutParams dpm = (FrameLayout.LayoutParams) dateRow.getLayoutParams();
         dpm.topMargin = dpi(DATE_TOP_DP) - dpi(4); // the chip's vertical padding
         dateRow.setLayoutParams(dpm);
+        FrameLayout.LayoutParams apm = (FrameLayout.LayoutParams) agenda.getLayoutParams();
+        apm.topMargin = dpi(DATE_TOP_DP) + dpi(30);
+        agenda.setLayoutParams(apm);
 
         FrameLayout.LayoutParams dk = (FrameLayout.LayoutParams) dock.getLayoutParams();
         dk.bottomMargin = dockBottomMargin();
@@ -964,6 +996,8 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     /** StatusBarManager.expandNotificationsPanel is hidden API, but launchers have used it for years. */
     @SuppressWarnings("JavaReflectionMemberAccess")
     private void expandNotifications() {
+        // our own notifications page when the panel service is on, otherwise the system shade
+        if (PanelService.openNotifications()) return;
         try {
             Object sb = getSystemService("statusbar");
             Class.forName("android.app.StatusBarManager").getMethod("expandNotificationsPanel").invoke(sb);
@@ -1480,6 +1514,27 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             return false;
         }
 
+        private long lastTapUp;
+        private float lastTapX, lastTapY;
+
+        /** Two quick taps on empty home space lock the phone. */
+        private void checkDoubleTap(MotionEvent ev) {
+            ViewConfiguration vc = ViewConfiguration.get(getContext());
+            boolean tap = ev.getEventTime() - ev.getDownTime() < ViewConfiguration.getTapTimeout() * 3
+                    && Math.hypot(ev.getX() - downX, ev.getY() - downY) < slop;
+            if (!tap || placing != null) { lastTapUp = 0; return; }
+            long now = ev.getEventTime();
+            if (now - lastTapUp < ViewConfiguration.getDoubleTapTimeout() + 60
+                    && Math.hypot(ev.getX() - lastTapX, ev.getY() - lastTapY) < vc.getScaledDoubleTapSlop()) {
+                lastTapUp = 0;
+                if (!PanelService.lockScreen()) snack("To lock with a double-tap, turn on Fast Launcher controls in Accessibility");
+                return;
+            }
+            lastTapUp = now;
+            lastTapX = ev.getX();
+            lastTapY = ev.getY();
+        }
+
         private float distanceFor(float dy) {
             // 1:1 with the finger over 45% of the screen: quick to complete, precise when slow
             return dy / (travel() * 0.45f);
@@ -1506,6 +1561,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
                     removeCallbacks(homeLongPress);
+                    if (!dragging && progress == 0f && ev.getActionMasked() == MotionEvent.ACTION_UP) checkDoubleTap(ev);
                     if (dragging) {
                         vt.computeCurrentVelocity(1000);
                         float vy = vt.getYVelocity();

@@ -35,6 +35,7 @@ import android.view.MotionEvent;
 import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -66,6 +67,11 @@ final class ControlPanel extends FrameLayout {
     }
 
     private final Host host;
+    private final LinearLayout notifButton, notifList;
+    private final PanelIcons notifBell;
+    private final TextView notifCount, notifEmpty, clearAll;
+    private final ScrollView notifScroll;
+    private boolean onNotifs, notifsDirty = true;
     final boolean isDark = Ui.dark; // the palette this panel was built in
     private final View scrim;
     private final LinearLayout card;
@@ -137,6 +143,24 @@ final class ControlPanel extends FrameLayout {
         tcol.addView(time);
         tcol.addView(date, Ui.lp(-2, -2, Ui.dpi(c, 4)));
         head.addView(tcol, new LinearLayout.LayoutParams(0, -2, 1f));
+        // notifications: a pill with the bell and how many there are; tap to switch pages
+        notifButton = new LinearLayout(c);
+        notifButton.setGravity(Gravity.CENTER_VERTICAL);
+        notifButton.setPadding(Ui.dpi(c, 11), 0, Ui.dpi(c, 14), 0);
+        notifButton.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 22)));
+        notifBell = new PanelIcons(c, PanelIcons.BELL, Ui.FG);
+        notifButton.addView(notifBell, Ui.lp(Ui.dpi(c, 22), Ui.dpi(c, 22)));
+        notifCount = Ui.text(c, "", 14, Ui.FG, true);
+        notifCount.setTypeface(Ui.font(c, 650));
+        LinearLayout.LayoutParams ncp = Ui.lp(-2, -2);
+        ncp.leftMargin = Ui.dpi(c, 6);
+        notifButton.addView(notifCount, ncp);
+        notifButton.setClickable(true);
+        Ui.pressable(notifButton);
+        notifButton.setOnClickListener(v -> showNotifications(!onNotifs));
+        LinearLayout.LayoutParams nbp = Ui.lp(-2, Ui.dpi(c, 44));
+        nbp.rightMargin = Ui.dpi(c, 8);
+        head.addView(notifButton, nbp);
         head.addView(circleButton(c, PanelIcons.GEAR, () -> open(new Intent(Settings.ACTION_SETTINGS))));
         card.addView(head, Ui.lp(-1, -2));
 
@@ -152,6 +176,42 @@ final class ControlPanel extends FrameLayout {
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-1, 0, 1f);
         slp.topMargin = Ui.dpi(c, 10);
         card.addView(scroll, slp);
+
+        // ---- the notifications page (swapped in for the controls)
+        notifScroll = new ScrollView(c);
+        notifScroll.setVerticalScrollBarEnabled(false);
+        notifScroll.setOverScrollMode(OVER_SCROLL_NEVER);
+        LinearLayout npage = new LinearLayout(c);
+        npage.setOrientation(LinearLayout.VERTICAL);
+        npage.setPadding(pad, 0, pad, Ui.dpi(c, 4));
+        LinearLayout nhead = new LinearLayout(c);
+        nhead.setGravity(Gravity.CENTER_VERTICAL);
+        nhead.setPadding(Ui.dpi(c, 10), 0, 0, 0);
+        TextView ntitle = Ui.text(c, "Notifications", 17, Ui.FG, true);
+        ntitle.setTypeface(Ui.font(c, 650));
+        nhead.addView(ntitle, new LinearLayout.LayoutParams(0, -2, 1f));
+        clearAll = Ui.text(c, "Clear all", 13.5f, Ui.FG, true);
+        clearAll.setTypeface(Ui.font(c, 600));
+        clearAll.setGravity(Gravity.CENTER);
+        clearAll.setPadding(Ui.dpi(c, 16), 0, Ui.dpi(c, 16), 0);
+        clearAll.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 18)));
+        clearAll.setClickable(true);
+        Ui.pressable(clearAll);
+        clearAll.setOnClickListener(v -> { NotifService.dismissAll(); showNotifications(false); });
+        nhead.addView(clearAll, Ui.lp(-2, Ui.dpi(c, 36)));
+        npage.addView(nhead, Ui.lp(-1, -2));
+        notifList = new LinearLayout(c);
+        notifList.setOrientation(LinearLayout.VERTICAL);
+        npage.addView(notifList, Ui.lp(-1, -2, Ui.dpi(c, 4)));
+        notifEmpty = Ui.text(c, "No notifications", 14, Ui.FG2, false);
+        notifEmpty.setGravity(Gravity.CENTER);
+        npage.addView(notifEmpty, Ui.lp(-1, Ui.dpi(c, 120)));
+        notifScroll.addView(npage);
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(-1, 0, 1f);
+        nlp.topMargin = Ui.dpi(c, 12);
+        notifScroll.setVisibility(GONE);
+        card.addView(notifScroll, nlp);
+        NotifService.panelListener = this::onNotifsChanged;
 
         // ---- four tiles, each its own button
         wifi = new Item(c, PanelIcons.WIFI, "Wi-Fi");
@@ -354,9 +414,11 @@ final class ControlPanel extends FrameLayout {
     // ================================================================ state
 
     /** Re-read every control's state; called the moment a finger lands on the pull strip. */
-    void refresh() {
+    void refresh(boolean notifications) {
         final Context c = getContext();
         scroll.scrollTo(0, 0);
+        showNotifications(notifications);
+        showNotifCount();
         // Each reading is isolated: this runs in the launcher's process, and one OEM quirk or
         // missing permission must never take the home screen down with it.
         safe(() -> {
@@ -676,6 +738,225 @@ final class ControlPanel extends FrameLayout {
         controller = null;
     }
 
+    // ================================================================ notifications
+
+    private final java.util.Map<String, CharSequence> appNames = new java.util.HashMap<>();
+    private final java.util.Map<String, android.graphics.drawable.Drawable> appIcons = new java.util.HashMap<>();
+
+    private void onNotifsChanged() {
+        notifsDirty = true;
+        showNotifCount();
+        if (onNotifs) buildNotifs();
+    }
+
+    private void showNotifCount() {
+        int n = NotifService.list.size();
+        setIfChanged(notifCount, n == 0 ? "" : n > 99 ? "99+" : String.valueOf(n));
+        notifCount.setVisibility(n == 0 ? GONE : VISIBLE);
+    }
+
+    private void showNotifications(boolean show) {
+        if (show && notifsDirty) buildNotifs();
+        if (show == onNotifs) return;
+        onNotifs = show;
+        Context c = getContext();
+        notifScroll.scrollTo(0, 0);
+        notifScroll.setVisibility(show ? VISIBLE : GONE);
+        scroll.setVisibility(show ? GONE : VISIBLE);
+        notifButton.setBackground(Ui.round(show ? Ui.ACCENT : Ui.GROUP, Ui.dp(c, 22)));
+        notifBell.setColor(show ? Color.WHITE : Ui.FG);
+        notifCount.setTextColor(show ? Color.WHITE : Ui.FG);
+    }
+
+    private void buildNotifs() {
+        notifsDirty = false;
+        notifList.removeAllViews();
+        List<android.service.notification.StatusBarNotification> all = NotifService.list;
+        int shown = Math.min(all.size(), 40);
+        for (int i = 0; i < shown; i++) {
+            View row = notifRow(all.get(i));
+            if (row != null) notifList.addView(row, Ui.lp(-1, -2, i == 0 ? 0 : Ui.dpi(getContext(), 8)));
+        }
+        boolean any = notifList.getChildCount() > 0;
+        notifEmpty.setVisibility(any ? GONE : VISIBLE);
+        clearAll.setVisibility(any ? VISIBLE : INVISIBLE);
+    }
+
+    private View notifRow(final android.service.notification.StatusBarNotification s) {
+        final Context c = getContext();
+        final android.app.Notification n = s.getNotification();
+        android.os.Bundle x = n.extras;
+        CharSequence title = x == null ? null : x.getCharSequence(android.app.Notification.EXTRA_TITLE);
+        CharSequence text = x == null ? null : x.getCharSequence(android.app.Notification.EXTRA_BIG_TEXT);
+        if (text == null && x != null) text = x.getCharSequence(android.app.Notification.EXTRA_TEXT);
+        if (title == null && text == null) return null;
+        String pkg = s.getPackageName();
+
+        NotifRow row = new NotifRow(c, () -> {
+            NotifService.dismiss(s.getKey());
+        }, () -> openNotif(s));
+        row.setGravity(Gravity.TOP);
+        row.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 22)));
+        int p = Ui.dpi(c, 14);
+        row.setPadding(p, p, p, p);
+
+        // the sender's picture when there is one (a chat contact), otherwise the app's icon
+        ImageView icon = new ImageView(c);
+        icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        android.graphics.drawable.Drawable d = null;
+        try { if (n.getLargeIcon() != null) d = n.getLargeIcon().loadDrawable(c); } catch (Exception ignored) {}
+        if (d != null) {
+            icon.setBackground(Ui.round(Ui.ICON_BG, Ui.dp(c, 20)));
+            icon.setClipToOutline(true);
+        } else {
+            d = appIcon(pkg);
+        }
+        icon.setImageDrawable(d);
+        row.addView(icon, Ui.lp(Ui.dpi(c, 40), Ui.dpi(c, 40)));
+
+        LinearLayout col = new LinearLayout(c);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setPadding(Ui.dpi(c, 12), 0, 0, 0);
+        TextView meta = Ui.text(c, appName(pkg) + "  ·  " + ago(s.getPostTime()), 11.5f, Ui.FG2, false);
+        meta.setSingleLine(true);
+        meta.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        col.addView(meta);
+        if (title != null) {
+            TextView t = Ui.text(c, title.toString().trim(), 14.5f, Ui.FG, true);
+            t.setTypeface(Ui.font(c, 600));
+            t.setSingleLine(true);
+            t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            col.addView(t, Ui.lp(-1, -2, Ui.dpi(c, 3)));
+        }
+        if (text != null) {
+            TextView b = Ui.text(c, text.toString().trim(), 13, Ui.FG2, false);
+            b.setMaxLines(2);
+            b.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            col.addView(b, Ui.lp(-1, -2, Ui.dpi(c, 2)));
+        }
+        row.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
+        row.dismissable = (n.flags & android.app.Notification.FLAG_NO_CLEAR) == 0;
+        return row;
+    }
+
+    private void openNotif(android.service.notification.StatusBarNotification s) {
+        android.app.Notification n = s.getNotification();
+        if (n.contentIntent != null) {
+            try {
+                android.app.ActivityOptions o = android.app.ActivityOptions.makeBasic();
+                if (android.os.Build.VERSION.SDK_INT >= 34)
+                    o.setPendingIntentBackgroundActivityStartMode(android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED);
+                n.contentIntent.send(getContext(), 0, null, null, null, null, o.toBundle());
+            } catch (Exception e) {
+                openApp(s.getPackageName());
+                return;
+            }
+        } else {
+            openApp(s.getPackageName());
+            return;
+        }
+        if ((n.flags & android.app.Notification.FLAG_AUTO_CANCEL) != 0) NotifService.dismiss(s.getKey());
+        close();
+    }
+
+    private CharSequence appName(String pkg) {
+        CharSequence name = appNames.get(pkg);
+        if (name == null) {
+            try {
+                android.content.pm.PackageManager pm = getContext().getPackageManager();
+                name = pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0));
+            } catch (Exception e) {
+                name = pkg;
+            }
+            appNames.put(pkg, name);
+        }
+        return name;
+    }
+
+    private android.graphics.drawable.Drawable appIcon(String pkg) {
+        android.graphics.drawable.Drawable d = appIcons.get(pkg);
+        if (d == null) {
+            try { d = getContext().getPackageManager().getApplicationIcon(pkg); } catch (Exception ignored) {}
+            if (d != null) appIcons.put(pkg, d);
+        }
+        return d == null ? null : d.getConstantState() != null ? d.getConstantState().newDrawable() : d;
+    }
+
+    private static String ago(long t) {
+        long m = (System.currentTimeMillis() - t) / 60000;
+        if (m < 1) return "now";
+        if (m < 60) return m + "m";
+        if (m < 24 * 60) return (m / 60) + "h";
+        return (m / (24 * 60)) + "d";
+    }
+
+    /** A notification card: tap to open, swipe sideways to dismiss. */
+    static final class NotifRow extends LinearLayout {
+        boolean dismissable = true;
+        private final Runnable onDismiss, onOpen;
+        private float downX, downY;
+        private boolean swiping, cancelled;
+        private VelocityTracker vt;
+        private final int slop;
+
+        NotifRow(Context c, Runnable dismiss, Runnable open) {
+            super(c);
+            onDismiss = dismiss;
+            onOpen = open;
+            slop = ViewConfiguration.get(c).getScaledTouchSlop();
+        }
+
+        @Override public boolean onTouchEvent(MotionEvent e) {
+            if (vt == null) vt = VelocityTracker.obtain();
+            vt.addMovement(e);
+            float dx = e.getRawX() - downX, dy = e.getRawY() - downY;
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downX = e.getRawX(); downY = e.getRawY();
+                    swiping = false; cancelled = false;
+                    animate().scaleX(0.98f).scaleY(0.98f).setDuration(90).start();
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    if (!swiping && !cancelled && dismissable && Math.abs(dx) > slop && Math.abs(dx) > Math.abs(dy)) {
+                        swiping = true;
+                        getParent().requestDisallowInterceptTouchEvent(true);
+                    }
+                    if (!swiping && Math.hypot(dx, dy) > slop) cancelled = true;
+                    if (swiping) {
+                        setTranslationX(dx);
+                        setAlpha(1f - Math.min(1f, Math.abs(dx) / Math.max(1, getWidth())));
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    animate().scaleX(1f).scaleY(1f).setDuration(140).start();
+                    vt.computeCurrentVelocity(1000);
+                    float vx = vt.getXVelocity();
+                    vt.recycle();
+                    vt = null;
+                    if (swiping) {
+                        boolean out = Math.abs(dx) > getWidth() * 0.35f || (Math.abs(vx) > 1200 && Math.signum(vx) == Math.signum(dx));
+                        if (out && e.getActionMasked() == MotionEvent.ACTION_UP) {
+                            float to = Math.signum(dx == 0 ? vx : dx) * getWidth();
+                            animate().translationX(to).alpha(0f).setDuration(160).withEndAction(() -> {
+                                ViewGroup p = (ViewGroup) getParent();
+                                if (p != null) p.removeView(this);
+                                onDismiss.run();
+                            }).start();
+                        } else {
+                            animate().translationX(0f).alpha(1f).setDuration(180).start();
+                        }
+                    } else if (!cancelled && e.getActionMasked() == MotionEvent.ACTION_UP) {
+                        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+                        onOpen.run();
+                    }
+                    swiping = false;
+                    return true;
+            }
+            return true;
+        }
+    }
+
     // ================================================================ motion
 
     private float cardTravel() {
@@ -749,7 +1030,7 @@ final class ControlPanel extends FrameLayout {
             case MotionEvent.ACTION_MOVE:
                 if (vt != null) vt.addMovement(e);
                 float dy = e.getRawY() - downY, dx = e.getRawX() - downX;
-                if (dy < -slop && Math.abs(dy) > Math.abs(dx) && !scroll.canScrollVertically(1)) {
+                if (dy < -slop && Math.abs(dy) > Math.abs(dx) && !(onNotifs ? notifScroll : scroll).canScrollVertically(1)) {
                     dragging = true;
                     downY = e.getRawY();
                     startProgress = progress;
