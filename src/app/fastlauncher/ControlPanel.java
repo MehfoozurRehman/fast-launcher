@@ -236,14 +236,18 @@ final class ControlPanel extends FrameLayout {
         rotate.setOnClickListener(v -> safe(this::toggleRotation));
         plane.setOnClickListener(v -> open(new Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS)));
         location.setOnClickListener(v -> open(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)));
-        dark.setOnClickListener(v -> open(new Intent("android.settings.DARK_THEME_SETTINGS")));
+        // Honor's dark-mode screen isn't open to other apps; its switch lives in Display settings
+        dark.setOnClickListener(v -> open(new Intent(Settings.ACTION_DISPLAY_SETTINGS)));
         dnd.setOnClickListener(v -> safe(this::toggleDnd));
         sound.setOnClickListener(v -> safe(this::cycleSound));
         eye.setOnClickListener(v -> open(new Intent(Settings.ACTION_DISPLAY_SETTINGS)));
         saver.setOnClickListener(v -> open(new Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS)));
         screenshot.setOnClickListener(v -> closeThen(380, () -> host.globalAction(AccessibilityService.GLOBAL_ACTION_TAKE_SCREENSHOT)));
-        record.setOnClickListener(v -> closeThen(300, () -> host.launch(
-                new Intent("com.hihonor.screenrecorder.intent.action.LMT_ScreenRecorder"))));
+        record.setOnClickListener(v -> {
+            boolean was = Recorder.recording;
+            closeThen(was ? 0 : 300, () -> Recorder.toggle(getContext()));
+        });
+        Recorder.onChange = () -> record.setActive(Recorder.recording);
         cast.setOnClickListener(v -> open(new Intent(Settings.ACTION_CAST_SETTINGS)));
         calc.setOnClickListener(v -> openApp("com.google.android.calculator", "com.hihonor.calculator"));
         recorder.setOnClickListener(v -> openApp("com.hihonor.soundrecorder", "com.google.android.apps.recorder"));
@@ -360,6 +364,7 @@ final class ControlPanel extends FrameLayout {
         safe(this::showSound);
         safe(() -> eye.setActive(Settings.System.getInt(c.getContentResolver(), "eyes_protection_mode", 0) == 1));
         safe(() -> saver.setActive(((PowerManager) c.getSystemService(Context.POWER_SERVICE)).isPowerSaveMode()));
+        record.setActive(Recorder.recording);
         safe(this::bindMedia);
     }
 
