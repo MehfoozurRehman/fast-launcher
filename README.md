@@ -25,9 +25,9 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   grid with Hotspot, Auto-rotate, Aeroplane, Location, Dark mode, Do not disturb, Sound mode, Eye
   comfort, Battery saver, Screenshot, Screen record, Cast, Calculator, Recorder, Lock and Power.
   Controls Android lets apps change are switched in place; the rest open their exact system page.
+  The pull strip is removed while the phone is locked.
 - **Light and dark mode**: the panel, menus and wallpaper sheet follow the system theme, using the
   same colours as the system's own pop-ups.
-  The pull strip is removed while the phone is locked.
 - **Type**: clock, date and headings use Montserrat (bundled, SIL Open Font License, see `assets/fonts/OFL.txt`).
 - **Long-press home**: wallpaper panel, the launcher's only settings.
   - Wallpapers come from [wallhaven.cc](https://wallhaven.cc) (SFW, portrait, at least 1080x1920).
@@ -35,44 +35,6 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   - **Browse**: grid by theme or Popular, endless scrolling, preview with your real clock and dock on top.
   - **Change automatically**: off, daily, every 2 or 3 days, from the themes you pick. Runs as a periodic
     job and is also checked whenever you return home, since OEM battery managers delay jobs.
-
-## Performance notes
-- Grids (`AppGridView`, the wallpaper grid) are single custom views drawing pre-rendered GPU bitmaps for
-  visible rows only. No child views, no layout passes while scrolling.
-- Icons are rendered once and cached as raw pixels (no PNG decode), and kept in a process-wide cache,
-  so an activity recreation or a cold start shows every icon on the first frame.
-- The drawer and home become hardware layers only while animating.
-- The wallpaper is the system wallpaper, so the launcher draws no background of its own.
-
-Measured on the X8b with `python tools/bench.py` (real touch input over adb, every frame counted;
-a frame is janky when it misses the 90 Hz deadline). Steady numbers across three runs:
-
-| Everyday action | Janky frames | 99th percentile frame |
-|---|---|---|
-| Home screen, idle | no frames drawn, ~0 CPU | - |
-| Drawer flick open/close | 0-0.4% | 15 ms |
-| Drawer slow drag | 0-0.6% | 15 ms |
-| Drawer scrolling | 0% | 13 ms |
-| Wallpaper browser scrolling | 0.5-1.2% | 15 ms |
-| Back home from an app | 0% (Honor draws the transition) | 13 ms |
-| Long-press menu | 9-12% (of ~20 frames) | 21 ms |
-| Search | 9-15% (of ~30 frames) | 24 ms |
-| Wallpaper panel | 3-4% | 34 ms |
-| Cold start, first frame | ~300 ms, of which ~210 ms is Android process + window setup | - |
-
-The remaining late frames are the first two or three frames of a transition that starts after an idle
-moment (Back key, closing a card): the GPU has clocked down and frames cost ~20 ms until it ramps up.
-Removing the dim, the labels, the icons or the blur changes GPU time by about 1 ms, so there is nothing
-left in the content to cut; steady scrolling is bounded by the panel's fixed per-frame GPU cost.
-
-What made the difference:
-- No shadows on drawer labels (they were regenerated every frame while rows faded in).
-- The blur is dimmed with a colour filter in the same draw, not with a second full-screen layer.
-- Home stops drawing once the drawer covers it; drawer fades without an offscreen buffer.
-- Insets ignore the keyboard (the IME used to re-lay out the whole launcher on every show/hide).
-- App shortcuts are fetched while the finger is still down; the menu card closes instantly.
-- The wallpaper panel is built once and pre-drawn invisibly; so is the drawer after startup.
-- The search field is created on first use; the dock has no scroller; job scheduling is off the main thread.
 
 ## Build and install
 Needs JDK 17 and the Android SDK (build-tools 36, platform 35). With the phone on USB debugging:
