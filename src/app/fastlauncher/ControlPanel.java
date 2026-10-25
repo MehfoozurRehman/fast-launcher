@@ -1222,9 +1222,7 @@ final class ControlPanel extends FrameLayout {
 
     @Override public boolean dispatchKeyEvent(android.view.KeyEvent e) {
         if (e.getKeyCode() == android.view.KeyEvent.KEYCODE_BACK) {
-            if (e.getAction() == android.view.KeyEvent.ACTION_UP) {
-                if (page == BT) showPage(CONTROLS); else close();
-            }
+            if (e.getAction() == android.view.KeyEvent.ACTION_UP) close();
             return true;
         }
         return super.dispatchKeyEvent(e);
