@@ -15,7 +15,11 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   echo of that shape. Every app gets a gentle variation seeded from its name. Shadows are baked in.
   Real adaptive icons are used even on Honor, whose icon theme normally swaps them for pre-shaped bitmaps
   (see `Icons.raw`: adaptive icons are inflated from their XML, bitmap icons decoded from raw PNG bytes).
-- **Long-press an app**: anchored menu with Add to dock (tap the dashed slot you want), App info, Uninstall.
+- **Long-press an app**: a card with the app's own shortcuts (round icons, e.g. recent WhatsApp chats),
+  round Info / Hide / Uninstall buttons and Add to dock (tap the dashed slot you want). Hidden apps
+  collect behind a pill at the bottom of the drawer.
+- **Swipe down on home** opens the notification shade.
+- **Type**: clock, date and headings use Montserrat (bundled, SIL Open Font License, see `assets/fonts/OFL.txt`).
 - **Long-press home**: wallpaper panel, the launcher's only settings.
   - Wallpapers come from [wallhaven.cc](https://wallhaven.cc) (SFW, portrait, at least 1080x1920).
   - **New one** swaps the wallpaper and remembers the old one as disliked, so it never comes back.
@@ -47,5 +51,6 @@ Needs JDK 17 and the Android SDK (build-tools 36, platform 35). With the phone o
 ```
 
 This builds, installs, sets the app as the home app and opens it. A signing key is generated locally on
-first build (`debug.keystore`, not committed). Notification badges need notification access for
+first build (`debug.keystore`, not committed). Keep a copy of it: updates must be signed with the same key,
+otherwise Android requires an uninstall (which loses the dock, hidden apps and notification access). Notification badges need notification access for
 "Fast Launcher badges" (Settings > Notification access).

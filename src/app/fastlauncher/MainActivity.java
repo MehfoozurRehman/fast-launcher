@@ -85,7 +85,8 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     /** Survives activity recreation (theme/wallpaper changes), so icons never blink. */
     private static final List<AppGridView.AppEntry> CACHE = new ArrayList<>();
     private final List<AppGridView.AppEntry> all = new ArrayList<>();
-    private List<AppGridView.AppEntry> shown = all;
+    private List<AppGridView.AppEntry> drawerApps = new ArrayList<>();
+    private List<AppGridView.AppEntry> shown = drawerApps;
     private final AppGridView.AppEntry[] dockEntries = new AppGridView.AppEntry[DOCK_SLOTS];
     private List<AppGridView.AppEntry> dockShown = new ArrayList<>();
     // Process-wide and never shut down: a late callback from an old activity instance
@@ -130,7 +131,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         if (!CACHE.isEmpty()) {
             all.addAll(CACHE);
             resolveDock();
-            grid.setItems(all);
+            refreshDrawerList();
             dock.setItems(dockShown);
         }
         watchWallpaperColors();
@@ -237,8 +238,8 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     static TextView makeClock(Context c) {
         TextView t = new TextView(c);
         t.setTextColor(Color.WHITE);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 74);
-        t.setTypeface(Ui.MEDIUM);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 76);
+        t.setTypeface(Ui.font(c, 650));
         t.setIncludeFontPadding(false);
         t.setGravity(Gravity.CENTER);
         t.setShadowLayer(Ui.dp(c, 6), 0, Ui.dp(c, 2), 0x40000000);
@@ -249,7 +250,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         TextView t = new TextView(c);
         t.setTextColor(Color.WHITE);
         t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 21);
-        t.setTypeface(Ui.MEDIUM);
+        t.setTypeface(Ui.font(c, 600));
         t.setIncludeFontPadding(false);
         t.setGravity(Gravity.CENTER);
         t.setShadowLayer(Ui.dp(c, 4), 0, Ui.dp(c, 1), 0x40000000);
@@ -361,6 +362,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             @Override public void onLongPress(AppGridView.AppEntry e, int index, float cx, float cy) {
                 appMenu(e, cx, cy);
             }
+            @Override public void onFooterTap(float cx, float cy) { hiddenMenu(cx, cy); }
         });
         drawer.addView(grid, new FrameLayout.LayoutParams(-1, -1, Gravity.TOP));
 
@@ -368,7 +370,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         title.setTextColor(Color.WHITE);
         title.setLineSpacing(dpi(4), 1f);
         title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 28);
-        title.setTypeface(Ui.MEDIUM);
+        title.setTypeface(Ui.font(this, 700));
         title.setIncludeFontPadding(false);
         title.setShadowLayer(dpi(3), 0, dpi(1), 0x55000000);
         drawer.addView(title, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START));
@@ -636,7 +638,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 CACHE.clear();
                 CACHE.addAll(list);
                 resolveDock();
-                if (searching) filter(search.getText().toString()); else { shown = all; grid.setItems(all); }
+                refreshDrawerList();
                 dock.setItems(dockShown);
             });
             // dock first so the home screen fills in before the drawer
@@ -740,27 +742,110 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private void appMenu(final AppGridView.AppEntry e, float cx, float cy) {
         int[] loc = new int[2];
         grid.getLocationInWindow(loc);
-        new Popup(this, e.label, new String[]{"Add to dock", "App info", "Uninstall"}, loc[0] + cx, loc[1] + cy,
-                grid.iconSizePx(), which -> {
-            if (which == 0) startPlacing(e);
-            else if (which == 1) appInfo(e);
-            else startSafely(new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + e.cn.getPackageName())), null);
-        }).open();
+        List<Popup.Btn> btns = new ArrayList<>();
+        btns.add(new Popup.Btn(Ui.G_INFO, Popup.NORMAL, () -> appInfo(e)));
+        btns.add(new Popup.Btn(Ui.G_HIDE, Popup.NORMAL, () -> setHidden(e, true)));
+        btns.add(new Popup.Btn(Ui.G_TRASH, Popup.DANGER, () -> startSafely(
+                new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + e.cn.getPackageName())), null)));
+        Popup.Item primary = new Popup.Item("Add to dock", null, () -> startPlacing(e));
+        primary.glyph = Ui.G_DOCK;
+        primary.tone = Popup.ACCENT;
+        new Popup(this, e.label, e.icon, btns, shortcutItems(e), primary, loc[0] + cx, loc[1] + cy, grid.iconSizePx()).open();
     }
 
     private void dockMenu(final AppGridView.AppEntry e, final int index, float cx, float cy) {
         if (e.blank) return;
         int[] loc = new int[2];
         dock.getLocationInWindow(loc);
-        new Popup(this, e.label, new String[]{"Remove from dock", "App info"}, loc[0] + cx, loc[1] + cy,
-                dock.iconSizePx(), which -> {
-            if (which == 0) {
-                dockEntries[index] = null;
-                saveDock();
-                rebuildDockList();
-                dock.setItems(dockShown);
-            } else appInfo(e);
-        }).open();
+        List<Popup.Btn> btns = new ArrayList<>();
+        btns.add(new Popup.Btn(Ui.G_INFO, Popup.NORMAL, () -> appInfo(e)));
+        Popup.Item primary = new Popup.Item("Remove from dock", null, () -> {
+            dockEntries[index] = null;
+            saveDock();
+            rebuildDockList();
+            dock.setItems(dockShown);
+        });
+        primary.glyph = Ui.G_MINUS;
+        primary.tone = Popup.DANGER;
+        new Popup(this, e.label, e.icon, btns, shortcutItems(e), primary, loc[0] + cx, loc[1] + cy, dock.iconSizePx()).open();
+    }
+
+    /** The app's own shortcuts (chats, new tab, ...). Only a default launcher may read them. */
+    private List<Popup.Item> shortcutItems(AppGridView.AppEntry e) {
+        List<Popup.Item> out = new ArrayList<>();
+        try {
+            final android.content.pm.LauncherApps la = getSystemService(android.content.pm.LauncherApps.class);
+            if (la == null || !la.hasShortcutHostPermission()) return out;
+            android.content.pm.LauncherApps.ShortcutQuery q = new android.content.pm.LauncherApps.ShortcutQuery();
+            q.setPackage(e.cn.getPackageName());
+            q.setQueryFlags(android.content.pm.LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC
+                    | android.content.pm.LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST);
+            List<android.content.pm.ShortcutInfo> list = la.getShortcuts(q, android.os.Process.myUserHandle());
+            if (list == null) return out;
+            List<android.content.pm.ShortcutInfo> sorted = new ArrayList<>(list);
+            // manifest shortcuts first (stable), then dynamic ones by the app's own rank
+            Collections.sort(sorted, (x, y) -> x.isDeclaredInManifest() != y.isDeclaredInManifest()
+                    ? (x.isDeclaredInManifest() ? -1 : 1) : Integer.compare(x.getRank(), y.getRank()));
+            int dpi = getResources().getDisplayMetrics().densityDpi;
+            Set<String> seen = new HashSet<>();
+            for (final android.content.pm.ShortcutInfo si : sorted) {
+                if (out.size() == 4) break;
+                if (!si.isEnabled()) continue;
+                // only shortcuts for the icon that was pressed, and no repeated names
+                if (si.getActivity() != null && !si.getActivity().equals(e.cn)) continue;
+                CharSequence label = si.getShortLabel() != null ? si.getShortLabel() : si.getLongLabel();
+                if (label == null || !seen.add(label.toString().trim().toLowerCase(Locale.ROOT))) continue;
+                android.graphics.drawable.Drawable icon = null;
+                try {
+                    android.graphics.drawable.Drawable raw = la.getShortcutIconDrawable(si, dpi);
+                    if (raw != null) icon = Ui.circle(this, raw, dpi(32));
+                } catch (Exception ignored) {}
+                out.add(new Popup.Item(label.toString(), icon, () -> {
+                    try { la.startShortcut(si, null, null); }
+                    catch (Exception ex) { snack("Couldn't open that shortcut"); }
+                }));
+            }
+        } catch (Exception ignored) {}
+        return out;
+    }
+
+    // ================================================================ hidden apps
+
+    private Set<String> hiddenSet() { return new HashSet<>(prefs.getStringSet("hidden", new HashSet<>())); }
+
+    private void refreshDrawerList() {
+        Set<String> hidden = hiddenSet();
+        List<AppGridView.AppEntry> l = new ArrayList<>();
+        for (AppGridView.AppEntry e : all) if (!hidden.contains(e.cn.flattenToString())) l.add(e);
+        drawerApps = l;
+        int n = all.size() - l.size();
+        grid.setFooter(n == 0 ? null : n + (n == 1 ? " hidden app" : " hidden apps"));
+        if (searching) filter(search.getText().toString());
+        else { shown = drawerApps; grid.setItems(drawerApps); }
+    }
+
+    private void setHidden(AppGridView.AppEntry e, boolean hide) {
+        Set<String> s = hiddenSet();
+        if (hide) s.add(e.cn.flattenToString()); else s.remove(e.cn.flattenToString());
+        prefs.edit().putStringSet("hidden", s).apply();
+        refreshDrawerList();
+        updateHeader();
+        snack(hide ? e.label + " hidden. Find it at the bottom of the drawer." : e.label + " is back in the drawer");
+    }
+
+    private void hiddenMenu(float cx, float cy) {
+        Set<String> hidden = hiddenSet();
+        List<Popup.Item> items = new ArrayList<>();
+        for (final AppGridView.AppEntry e : all) {
+            if (!hidden.contains(e.cn.flattenToString())) continue;
+            android.graphics.drawable.Drawable icon = e.icon == null ? null
+                    : new android.graphics.drawable.BitmapDrawable(getResources(), e.icon);
+            items.add(new Popup.Item(e.label, icon, () -> setHidden(e, false)));
+        }
+        if (items.isEmpty()) return;
+        int[] loc = new int[2];
+        grid.getLocationInWindow(loc);
+        new Popup(this, "Hidden apps", null, new ArrayList<>(), items, null, loc[0] + cx, loc[1] + cy, 0).open();
     }
 
     private void appInfo(AppGridView.AppEntry e) {
@@ -795,6 +880,18 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         hideSnack();
     }
 
+    /** StatusBarManager.expandNotificationsPanel is hidden API, but launchers have used it for years. */
+    @SuppressWarnings("JavaReflectionMemberAccess")
+    private void expandNotifications() {
+        try {
+            Object sb = getSystemService("statusbar");
+            Class.forName("android.app.StatusBarManager").getMethod("expandNotificationsPanel").invoke(sb);
+            root.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        } catch (Throwable t) {
+            android.util.Log.w("FastLauncher", "couldn't open the notification shade: " + t);
+        }
+    }
+
     // ================================================================ drawer header
 
     /** A greeting for the time of day, with a quiet live line under it. */
@@ -805,7 +902,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         int unread = 0;
         for (Integer n : NotifService.counts.values()) unread += n;
         StringBuilder sub = new StringBuilder();
-        sub.append(all.size()).append(" apps");
+        sub.append(drawerApps.size()).append(" apps");
         if (unread > 0) sub.append("  ·  ").append(unread).append(unread == 1 ? " notification" : " notifications");
         Weather.Now w = Weather.cached(this);
         if (w != null) sub.append("  ·  ").append(w.tempC).append("°C");
@@ -838,16 +935,16 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         title.setVisibility(View.VISIBLE);
         title.setAlpha(1f);
         btnSearch.setVisibility(View.VISIBLE);
-        shown = all;
-        grid.setItems(all);
+        shown = drawerApps;
+        grid.setItems(drawerApps);
     }
 
     private void filter(String q) {
         q = q.trim().toLowerCase(Locale.getDefault());
-        if (q.isEmpty()) { shown = all; grid.setItems(all); return; }
+        if (q.isEmpty()) { shown = drawerApps; grid.setItems(drawerApps); return; }
         // prefix matches (on any word) first, then anything containing the text
         List<AppGridView.AppEntry> starts = new ArrayList<>(), contains = new ArrayList<>();
-        for (AppGridView.AppEntry e : all) {
+        for (AppGridView.AppEntry e : drawerApps) {
             if (e.lower.startsWith(q) || e.lower.contains(" " + q)) starts.add(e);
             else if (e.lower.contains(q)) contains.add(e);
         }
@@ -927,60 +1024,151 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
     // ================================================================ popup menu
 
-    interface OnItem { void onItem(int which); }
-
-    /** A small card anchored to an icon, instead of a system dialog. */
+    /**
+     * The long-press card: app icon and name with round action buttons on top, the app's
+     * own shortcuts (round icons) in the middle, and one full-width action at the bottom.
+     */
     static final class Popup extends WallpaperUi.Overlay {
+        static final int NORMAL = 0, ACCENT = 1, DANGER = 2;
+
+        static final class Item {
+            final String label;
+            final android.graphics.drawable.Drawable icon;
+            final Runnable action;
+            int glyph = -1, tone = NORMAL;
+
+            Item(String label, android.graphics.drawable.Drawable icon, Runnable action) {
+                this.label = label; this.icon = icon; this.action = action;
+            }
+        }
+
+        static final class Btn {
+            final int glyph, tone;
+            final Runnable action;
+            Btn(int glyph, int tone, Runnable action) { this.glyph = glyph; this.tone = tone; this.action = action; }
+        }
+
         private final LinearLayout card;
         private final View dim;
 
-        Popup(WallpaperUi.Host h, String heading, String[] items, final float ax, final float ay, final float iconSize,
-              final OnItem cb) {
+        Popup(WallpaperUi.Host h, String heading, android.graphics.Bitmap appIcon, List<Btn> btns, List<Item> items,
+              Item primary, final float ax, final float ay, final float iconSize) {
             super(h);
             Context c = getContext();
             dim = new View(c);
-            dim.setBackgroundColor(0x33000000);
+            dim.setBackgroundColor(0x40000000);
             dim.setAlpha(0f);
             dim.setOnClickListener(v -> close());
             addView(dim, new FrameLayout.LayoutParams(-1, -1));
 
             card = new LinearLayout(c);
             card.setOrientation(LinearLayout.VERTICAL);
-            card.setBackground(Ui.round(0xF7202227, Ui.dp(c, 22)));
-            card.setPadding(0, Ui.dpi(c, 8), 0, Ui.dpi(c, 8));
-            card.setElevation(Ui.dp(c, 12));
-            TextView head = Ui.text(c, heading, 12.5f, Ui.FG3, true);
-            head.setPadding(Ui.dpi(c, 20), Ui.dpi(c, 8), Ui.dpi(c, 20), Ui.dpi(c, 6));
-            head.setSingleLine(true);
-            head.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            card.addView(head);
-            for (int i = 0; i < items.length; i++) {
-                final int which = i;
-                TextView row = Ui.text(c, items[i], 16, Ui.FG, false);
+            card.setBackground(Ui.round(0xFF1B1D21, Ui.dp(c, 28)));
+            card.setPadding(0, Ui.dpi(c, 6), 0, Ui.dpi(c, 10));
+            card.setElevation(Ui.dp(c, 14));
+            card.setClipToOutline(true);
+
+            // header: icon + name + round buttons
+            LinearLayout head = new LinearLayout(c);
+            head.setGravity(Gravity.CENTER_VERTICAL);
+            head.setPadding(Ui.dpi(c, 14), Ui.dpi(c, 8), Ui.dpi(c, 10), Ui.dpi(c, 8));
+            if (appIcon != null) {
+                android.widget.ImageView iv = new android.widget.ImageView(c);
+                iv.setImageBitmap(appIcon);
+                LinearLayout.LayoutParams ip = Ui.lp(Ui.dpi(c, 40), Ui.dpi(c, 40));
+                ip.rightMargin = Ui.dpi(c, 10);
+                head.addView(iv, ip);
+            }
+            TextView name = Ui.text(c, heading, 16.5f, Ui.FG, true);
+            name.setTypeface(Ui.font(c, 600));
+            name.setSingleLine(true);
+            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            head.addView(name, new LinearLayout.LayoutParams(0, -2, 1f));
+            for (final Btn b : btns) {
+                Ui.Glyph g = new Ui.Glyph(c, b.glyph, b.tone == DANGER ? Ui.DANGER : Ui.FG);
+                g.setBackground(Ui.round(b.tone == DANGER ? Ui.DANGER_BG : 0x1FFFFFFF, Ui.dp(c, 20)));
+                g.setPadding(Ui.dpi(c, 10), Ui.dpi(c, 10), Ui.dpi(c, 10), Ui.dpi(c, 10));
+                g.setClickable(true);
+                Ui.pressable(g);
+                g.setOnClickListener(v -> { close(); b.action.run(); });
+                LinearLayout.LayoutParams bp = Ui.lp(Ui.dpi(c, 40), Ui.dpi(c, 40));
+                bp.leftMargin = Ui.dpi(c, 6);
+                head.addView(g, bp);
+            }
+            card.addView(head, Ui.lp(-1, -2));
+
+            // shortcuts / list rows
+            if (!items.isEmpty()) {
+                View line = new View(c);
+                line.setBackgroundColor(0x14FFFFFF);
+                LinearLayout.LayoutParams dl = Ui.lp(-1, Math.max(1, Ui.dpi(c, 1)));
+                dl.leftMargin = dl.rightMargin = Ui.dpi(c, 16);
+                dl.bottomMargin = Ui.dpi(c, 4);
+                card.addView(line, dl);
+            }
+            for (final Item it : items) {
+                LinearLayout row = new LinearLayout(c);
                 row.setGravity(Gravity.CENTER_VERTICAL);
-                row.setPadding(Ui.dpi(c, 20), 0, Ui.dpi(c, 20), 0);
+                row.setPadding(Ui.dpi(c, 12), 0, Ui.dpi(c, 14), 0);
                 row.setClickable(true);
-                row.setBackground(Ui.round(0x00000000, Ui.dp(c, 14)));
+                row.setBackground(Ui.round(0x00000000, Ui.dp(c, 16)));
+                if (it.icon != null) {
+                    android.widget.ImageView iv = new android.widget.ImageView(c);
+                    iv.setImageDrawable(it.icon);
+                    LinearLayout.LayoutParams ip = Ui.lp(Ui.dpi(c, 32), Ui.dpi(c, 32));
+                    ip.rightMargin = Ui.dpi(c, 12);
+                    row.addView(iv, ip);
+                }
+                TextView t = Ui.text(c, it.label, 15.5f, Ui.FG, false);
+                t.setSingleLine(true);
+                t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                row.addView(t, new LinearLayout.LayoutParams(0, -2, 1f));
                 row.setOnTouchListener((v, ev) -> {
-                    if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) v.setBackground(Ui.round(0x1FFFFFFF, Ui.dp(c, 14)));
+                    if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) v.setBackground(Ui.round(0x1AFFFFFF, Ui.dp(c, 16)));
                     else if (ev.getActionMasked() == MotionEvent.ACTION_UP || ev.getActionMasked() == MotionEvent.ACTION_CANCEL)
-                        v.setBackground(Ui.round(0x00000000, Ui.dp(c, 14)));
+                        v.setBackground(Ui.round(0x00000000, Ui.dp(c, 16)));
                     return false;
                 });
-                row.setOnClickListener(v -> { close(); cb.onItem(which); });
-                LinearLayout.LayoutParams rp = Ui.lp(-1, Ui.dpi(c, 48));
+                row.setOnClickListener(v -> { close(); it.action.run(); });
+                LinearLayout.LayoutParams rp = Ui.lp(-1, Ui.dpi(c, 50));
                 rp.leftMargin = rp.rightMargin = Ui.dpi(c, 6);
                 card.addView(row, rp);
             }
-            int w = Ui.dpi(c, 230);
+
+            // one full-width action
+            if (primary != null) {
+                LinearLayout pill = new LinearLayout(c);
+                pill.setGravity(Gravity.CENTER);
+                int bg = primary.tone == DANGER ? Ui.DANGER_BG : primary.tone == ACCENT ? Ui.ACCENT : 0x1FFFFFFF;
+                int fg = primary.tone == DANGER ? Ui.DANGER : Ui.FG;
+                pill.setBackground(Ui.round(bg, Ui.dp(c, 23)));
+                if (primary.glyph >= 0) {
+                    pill.addView(new Ui.Glyph(c, primary.glyph, fg), Ui.lp(Ui.dpi(c, 20), Ui.dpi(c, 20)));
+                }
+                TextView pt = Ui.text(c, primary.label, 15, fg, true);
+                pt.setTypeface(Ui.font(c, 600));
+                LinearLayout.LayoutParams ptp = Ui.lp(-2, -2);
+                ptp.leftMargin = Ui.dpi(c, 8);
+                pill.addView(pt, ptp);
+                pill.setClickable(true);
+                Ui.pressable(pill);
+                pill.setOnClickListener(v -> { close(); primary.action.run(); });
+                LinearLayout.LayoutParams pp = Ui.lp(-1, Ui.dpi(c, 46), Ui.dpi(c, items.isEmpty() ? 4 : 8));
+                pp.leftMargin = pp.rightMargin = Ui.dpi(c, 12);
+                card.addView(pill, pp);
+            }
+
+            int w = Ui.dpi(c, 280);
             card.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.UNSPECIFIED);
             int ch = card.getMeasuredHeight();
             int screenW = c.getResources().getDisplayMetrics().widthPixels;
+            int screenH = c.getResources().getDisplayMetrics().heightPixels;
             int margin = Ui.dpi(c, 12);
             float gap = iconSize / 2f + Ui.dp(c, 14);
             boolean above = ay - gap - ch > h.insetTop() + margin;
             int x = Math.round(Math.max(margin, Math.min(screenW - margin - w, ax - w / 2f)));
             int y = Math.round(above ? ay - gap - ch : ay + gap);
+            y = Math.max(h.insetTop() + margin, Math.min(screenH - h.insetBottom() - margin - ch, y));
             FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(w, -2, Gravity.TOP | Gravity.START);
             lp.leftMargin = x;
             lp.topMargin = y;
@@ -1008,7 +1196,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     final class Root extends FrameLayout {
         float progress; // 0 closed .. 1 open
         private float downX, downY, startProgress;
-        private boolean dragging, homeLayered, barsDark = true;
+        private boolean dragging, homeLayered, barsDark = true, shadeFired;
         private VelocityTracker vt;
         private ValueAnimator anim;
         private final int slop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
@@ -1104,6 +1292,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 case MotionEvent.ACTION_DOWN:
                     downX = ev.getX(); downY = ev.getY();
                     dragging = false;
+                    shadeFired = false;
                     if (vt != null) vt.recycle();
                     vt = VelocityTracker.obtain();
                     vt.addMovement(ev);
@@ -1128,6 +1317,15 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         private boolean maybeStartDrag(MotionEvent ev) {
             if (placing != null) return false;
             float dy = ev.getY() - downY, dx = ev.getX() - downX;
+            if (progress == 0f && dy > slop * 2 && Math.abs(dy) > Math.abs(dx) * 1.3f) {
+                // home screen, pulling down: hand off to the notification shade, once per gesture
+                if (!shadeFired) {
+                    shadeFired = true;
+                    removeCallbacks(homeLongPress);
+                    expandNotifications();
+                }
+                return true;
+            }
             if (Math.abs(dy) > slop && Math.abs(dy) > Math.abs(dx)) {
                 boolean opening = progress < 0.5f && dy < 0;
                 boolean closing = progress >= 0.5f && dy > 0 && grid.atTop() && !searching;
@@ -1156,6 +1354,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             switch (ev.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     downX = ev.getX(); downY = ev.getY(); startProgress = progress;
+                    shadeFired = false;
                     if (animating()) { anim.cancel(); dragging = true; beginLayers(); return true; }
                     if (placing != null) { cancelPlacing(); return true; }
                     if (progress == 0f) postDelayed(homeLongPress, ViewConfiguration.getLongPressTimeout() + 80);

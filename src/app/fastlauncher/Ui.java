@@ -33,11 +33,62 @@ final class Ui {
     static final int CARD = 0xFF16171A;
     static final int FILL = 0x1AFFFFFF;
     static final int INK = 0xFF111214;
-    static final int DANGER = 0xFFFF8A80;
+    static final int DANGER = 0xFFFF6B60;
+    static final int DANGER_BG = 0x2EFF453A;
+    static final int ACCENT = 0xFF2F7CF6;
+    static final int GROUP = 0xFF212328;
     static final Typeface MEDIUM = Typeface.create("sans-serif-medium", Typeface.NORMAL);
     static final Typeface REGULAR = Typeface.create("sans-serif", Typeface.NORMAL);
     static final Interpolator EMPHASIZED = new PathInterpolator(0.05f, 0.7f, 0.1f, 1f);
     static final Interpolator STANDARD = new PathInterpolator(0.2f, 0f, 0f, 1f);
+
+    private static final java.util.HashMap<Integer, Typeface> FONTS = new java.util.HashMap<>();
+
+    /** Montserrat (bundled, OFL) at any weight from its variable font; system font as fallback. */
+    static Typeface font(Context c, int weight) {
+        Typeface t = FONTS.get(weight);
+        if (t != null) return t;
+        try {
+            t = new Typeface.Builder(c.getAssets(), "fonts/Montserrat.ttf")
+                    .setFontVariationSettings("'wght' " + weight).build();
+        } catch (Exception e) {
+            t = null;
+        }
+        if (t == null) t = weight >= 500 ? MEDIUM : REGULAR;
+        FONTS.put(weight, t);
+        return t;
+    }
+
+    /** A rounded inner card that groups related settings. */
+    static LinearLayout group(Context c) {
+        LinearLayout g = new LinearLayout(c);
+        g.setOrientation(LinearLayout.VERTICAL);
+        g.setBackground(round(GROUP, dp(c, 22)));
+        int p = dpi(c, 16);
+        g.setPadding(p, p, p, p);
+        return g;
+    }
+
+    /** Any drawable, rendered and cropped to a circle (contact photos, shortcut icons). */
+    static android.graphics.drawable.Drawable circle(Context c, android.graphics.drawable.Drawable d, int px) {
+        Bitmap src = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888);
+        if (d instanceof android.graphics.drawable.AdaptiveIconDrawable) {
+            // draw both layers edge to edge, skipping the system mask, then crop round
+            android.graphics.drawable.AdaptiveIconDrawable a = (android.graphics.drawable.AdaptiveIconDrawable) d;
+            int ext = Math.round(px * 0.25f);
+            Canvas cv = new Canvas(src);
+            if (a.getBackground() != null) { a.getBackground().setBounds(-ext, -ext, px + ext, px + ext); a.getBackground().draw(cv); }
+            if (a.getForeground() != null) { a.getForeground().setBounds(-ext, -ext, px + ext, px + ext); a.getForeground().draw(cv); }
+        } else {
+            d.setBounds(0, 0, px, px);
+            d.draw(new Canvas(src));
+        }
+        Bitmap out = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        p.setShader(new BitmapShader(src, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
+        new Canvas(out).drawCircle(px / 2f, px / 2f, px / 2f, p);
+        return new android.graphics.drawable.BitmapDrawable(c.getResources(), out);
+    }
 
     static float dp(Context c, float v) { return v * c.getResources().getDisplayMetrics().density; }
     static int dpi(Context c, float v) { return Math.round(dp(c, v)); }
@@ -94,7 +145,8 @@ final class Ui {
 
     // ------------------------------------------------------------------ glyphs
 
-    static final int G_SEARCH = 0, G_SHUFFLE = 1, G_GRID = 2, G_BACK = 3, G_CHECK = 4, G_SPIN = 5, G_EYE = 6;
+    static final int G_SEARCH = 0, G_SHUFFLE = 1, G_GRID = 2, G_BACK = 3, G_CHECK = 4, G_SPIN = 5, G_EYE = 6,
+            G_INFO = 7, G_HIDE = 8, G_TRASH = 9, G_DOCK = 10, G_MINUS = 11;
 
     /** Line-art glyphs drawn on a 24-unit grid. */
     static final class Glyph extends View {
@@ -161,6 +213,39 @@ final class Ui {
                     c.drawPath(path, p);
                     c.drawCircle(12, 12, 3, p);
                     break;
+                case G_INFO:
+                    c.drawCircle(12, 12, 9, p);
+                    c.drawLine(12, 11, 12, 16.5f, p);
+                    c.drawPoint(12, 7.6f, p);
+                    break;
+                case G_HIDE:
+                    path.moveTo(2.5f, 12);
+                    path.cubicTo(6, 5.5f, 18, 5.5f, 21.5f, 12);
+                    path.cubicTo(18, 18.5f, 6, 18.5f, 2.5f, 12);
+                    c.drawPath(path, p);
+                    c.drawCircle(12, 12, 3, p);
+                    c.drawLine(4, 20, 20, 4, p);
+                    break;
+                case G_TRASH:
+                    path.moveTo(5, 7); path.lineTo(19, 7);
+                    path.moveTo(9.5f, 7); path.lineTo(10, 4.5f); path.lineTo(14, 4.5f); path.lineTo(14.5f, 7);
+                    path.moveTo(6.5f, 7); path.lineTo(7.5f, 19.5f); path.lineTo(16.5f, 19.5f); path.lineTo(17.5f, 7);
+                    path.moveTo(10.2f, 10.5f); path.lineTo(10.2f, 16);
+                    path.moveTo(13.8f, 10.5f); path.lineTo(13.8f, 16);
+                    c.drawPath(path, p);
+                    break;
+                case G_DOCK: {
+                    RectF r = new RectF(4, 13, 20, 19.5f);
+                    c.drawRoundRect(r, 3, 3, p);
+                    c.drawLine(12, 3.5f, 12, 10, p);
+                    c.drawLine(9, 7, 12, 10, p);
+                    c.drawLine(15, 7, 12, 10, p);
+                    break;
+                }
+                case G_MINUS:
+                    c.drawCircle(12, 12, 9, p);
+                    c.drawLine(8, 12, 16, 12, p);
+                    break;
                 case G_SPIN: {
                     float a = (android.os.SystemClock.uptimeMillis() % 900) / 900f * 360f;
                     c.drawArc(new RectF(4, 4, 20, 20), a, 270, false, p);
@@ -189,11 +274,12 @@ final class Ui {
             int h = dpi(c, 48);
             setMinimumHeight(h);
             setPadding(dpi(c, 18), 0, dpi(c, 20), 0);
-            setBackground(round(primary ? Color.WHITE : 0x24FFFFFF, h / 2f));
-            int fg = primary ? INK : FG;
+            setBackground(round(primary ? ACCENT : 0x24FFFFFF, h / 2f));
+            int fg = FG;
             glyph = new Glyph(c, glyphType, fg);
             addView(glyph, lp(dpi(c, 20), dpi(c, 20)));
             label = text(c, text, 15, fg, true);
+            label.setTypeface(font(c, 600));
             LinearLayout.LayoutParams tp = lp(-2, -2);
             tp.leftMargin = dpi(c, 8);
             addView(label, tp);
@@ -233,8 +319,8 @@ final class Ui {
         void setOn(boolean v) {
             on = v;
             float r = dp(getContext(), 19);
-            setBackground(round(v ? Color.WHITE : FILL, r));
-            setTextColor(v ? INK : FG);
+            setBackground(round(v ? ACCENT : FILL, r));
+            setTextColor(FG);
         }
     }
 
@@ -291,9 +377,9 @@ final class Ui {
             this.selected = selected;
             this.pos = selected;
             track.setColor(FILL);
-            thumb.setColor(Color.WHITE);
+            thumb.setColor(ACCENT);
             text.setTextAlign(Paint.Align.CENTER);
-            text.setTypeface(MEDIUM);
+            text.setTypeface(font(c, 600));
             text.setTextSize(dp(c, 14));
         }
 
@@ -311,7 +397,7 @@ final class Ui {
             c.drawRoundRect(x + inset, inset, x + seg - inset, h - inset, r - inset, r - inset, thumb);
             for (int i = 0; i < options.length; i++) {
                 float d = Math.max(0f, 1f - Math.abs(pos - i));
-                text.setColor(blend(FG2, INK, d));
+                text.setColor(blend(FG2, FG, d));
                 c.drawText(options[i], seg * (i + 0.5f), h / 2f + text.getTextSize() * 0.36f, text);
             }
         }
@@ -371,10 +457,10 @@ final class Ui {
 
         @Override protected void onDraw(Canvas c) {
             float w = getWidth(), h = getHeight(), r = h / 2f, in = dp(getContext(), 3);
-            p.setColor(blend(0x33FFFFFF, Color.WHITE, pos));
+            p.setColor(blend(0x33FFFFFF, ACCENT, pos));
             c.drawRoundRect(0, 0, w, h, r, r, p);
             float cx = r + (w - 2 * r) * pos;
-            p.setColor(blend(Color.WHITE, INK, pos));
+            p.setColor(Color.WHITE);
             c.drawCircle(cx, r, r - in, p);
         }
     }

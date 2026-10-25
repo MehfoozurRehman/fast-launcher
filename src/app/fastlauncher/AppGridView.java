@@ -42,6 +42,7 @@ final class AppGridView extends View {
     interface Listener {
         void onTap(AppEntry e, int index);
         void onLongPress(AppEntry e, int index, float cx, float cy);
+        default void onFooterTap(float cx, float cy) {}
     }
 
     private List<AppEntry> items = new ArrayList<>();
@@ -63,6 +64,9 @@ final class AppGridView extends View {
     private boolean slots;
     private long slotsSince;
     private float reveal = 1f;
+    private String footer;
+    private final Paint footerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint footerText = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     private final OverScroller scroller;
     private final EdgeEffect bottomEdge;
@@ -120,7 +124,25 @@ final class AppGridView extends View {
         slotPaint.setStrokeWidth(1.6f * d);
         slotPaint.setColor(0xCCFFFFFF);
         slotPaint.setPathEffect(new DashPathEffect(new float[]{6 * d, 5 * d}, 0));
+        footerPaint.setColor(0x26FFFFFF);
+        footerText.setColor(0xCCFFFFFF);
+        footerText.setTextAlign(Paint.Align.CENTER);
+        footerText.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        footerText.setTextSize(13 * c.getResources().getDisplayMetrics().scaledDensity);
     }
+
+    /** A quiet pill under the last row (e.g. "3 hidden apps"); null hides it. */
+    void setFooter(String text) {
+        footer = text;
+        invalidate();
+    }
+
+    private float footerTop() {
+        int rows = (items.size() + cols - 1) / cols;
+        return topPad + rows * rowH + 6 * density;
+    }
+
+    private float footerH() { return footer == null ? 0 : 40 * density; }
 
     @Override public boolean hasOverlappingRendering() { return false; }
 
@@ -178,7 +200,7 @@ final class AppGridView extends View {
 
     private float maxOff() {
         int rows = (items.size() + cols - 1) / cols;
-        float content = topPad + rows * rowH + bottomPad;
+        float content = topPad + rows * rowH + (footer == null ? 0 : footerH() + 12 * density) + bottomPad;
         return Math.max(0, content - getHeight());
     }
 
@@ -245,6 +267,14 @@ final class AppGridView extends View {
                 if (labels && e.drawLabel != null) {
                     canvas.drawText(e.drawLabel, cx, top + iconSize + labelGap + textPaint.getTextSize(), textPaint);
                 }
+            }
+        }
+        if (footer != null && !revealing) {
+            float y = footerTop() - off;
+            if (y < h && y + footerH() > 0) {
+                float w = footerText.measureText(footer) + 36 * density, cx = getWidth() / 2f;
+                canvas.drawRoundRect(cx - w / 2, y, cx + w / 2, y + footerH(), footerH() / 2, footerH() / 2, footerPaint);
+                canvas.drawText(footer, cx, y + footerH() / 2 + footerText.getTextSize() * 0.35f, footerText);
             }
         }
         if (slots && slotAlpha < 1f) postInvalidateOnAnimation();
@@ -319,6 +349,10 @@ final class AppGridView extends View {
                 } else if (!longFired && pressedIndex >= 0 && listener != null
                         && Math.abs(ev.getX() - downX) < slop * 2 && Math.abs(ev.getY() - downY) < slop * 2) {
                     listener.onTap(items.get(pressedIndex), pressedIndex);
+                } else if (pressedIndex < 0 && footer != null && listener != null
+                        && Math.abs(ev.getY() - downY) < slop * 2) {
+                    float y = footerTop() - off;
+                    if (ev.getY() >= y && ev.getY() <= y + footerH()) listener.onFooterTap(getWidth() / 2f, y + footerH() / 2);
                 }
                 bottomEdge.onRelease();
                 postInvalidateOnAnimation();

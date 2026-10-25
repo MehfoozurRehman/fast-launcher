@@ -126,7 +126,9 @@ final class WallpaperUi {
             hp.bottomMargin = Ui.dpi(c, 14);
             card.addView(handle, hp);
 
-            card.addView(Ui.text(c, "Wallpaper", 24, Ui.FG, true));
+            TextView sheetTitle = Ui.text(c, "Wallpaper", 26, Ui.FG, true);
+            sheetTitle.setTypeface(Ui.font(c, 700));
+            card.addView(sheetTitle);
             card.addView(Ui.text(c, "Fresh picks from wallhaven.cc", 13.5f, Ui.FG2, false), Ui.lp(-2, -2, Ui.dpi(c, 6)));
 
             // --- now showing
@@ -147,6 +149,7 @@ final class WallpaperUi {
             row.addView(col, colp);
             col.addView(Ui.label(c, "Now showing"));
             nowTitle = Ui.text(c, "", 19, Ui.FG, true);
+            nowTitle.setTypeface(Ui.font(c, 600));
             col.addView(nowTitle, Ui.lp(-1, -2, Ui.dpi(c, 8)));
             nowSub = Ui.text(c, "", 13, Ui.FG2, false);
             nowSub.setLineSpacing(0, 1.2f);
@@ -162,24 +165,28 @@ final class WallpaperUi {
             now.setOnClickListener(v -> new Browser(host).open());
 
             // --- auto change
+            LinearLayout g1 = Ui.group(c);
+            card.addView(g1, Ui.lp(-1, -2, Ui.dpi(c, 20)));
             LinearLayout autoHead = new LinearLayout(c);
             autoHead.setGravity(Gravity.CENTER_VERTICAL);
-            card.addView(autoHead, Ui.lp(-1, -2, Ui.dpi(c, 26)));
+            g1.addView(autoHead, Ui.lp(-1, -2));
             autoHead.addView(Ui.label(c, "Change automatically"), new LinearLayout.LayoutParams(0, -2, 1f));
             nextText = Ui.text(c, "", 12.5f, Ui.FG3, false);
             autoHead.addView(nextText);
             Ui.Segmented seg = new Ui.Segmented(c, Walls.INTERVAL_LABELS, Walls.interval(c));
-            card.addView(seg, Ui.lp(-1, -2, Ui.dpi(c, 12)));
+            g1.addView(seg, Ui.lp(-1, -2, Ui.dpi(c, 12)));
             seg.setListener(i -> { Walls.setInterval(getContext(), i); refreshNext(); });
 
             // --- themes
+            LinearLayout g2 = Ui.group(c);
+            card.addView(g2, Ui.lp(-1, -2, Ui.dpi(c, 10)));
             LinearLayout themeHead = new LinearLayout(c);
             themeHead.setGravity(Gravity.CENTER_VERTICAL);
-            card.addView(themeHead, Ui.lp(-1, -2, Ui.dpi(c, 26)));
+            g2.addView(themeHead, Ui.lp(-1, -2));
             themeHead.addView(Ui.label(c, "Themes"), new LinearLayout.LayoutParams(0, -2, 1f));
             themeHead.addView(Ui.text(c, "New ones come from these", 12.5f, Ui.FG3, false));
             Ui.Flow flow = new Ui.Flow(c, Ui.dpi(c, 8));
-            card.addView(flow, Ui.lp(-1, -2, Ui.dpi(c, 12)));
+            g2.addView(flow, Ui.lp(-1, -2, Ui.dpi(c, 12)));
             final Set<String> chosen = Walls.themes(c);
             for (final Walls.Theme t : Walls.THEMES) {
                 final Ui.Chip chip = new Ui.Chip(c, t.label);
@@ -200,9 +207,10 @@ final class WallpaperUi {
             }
 
             // --- lock screen
-            LinearLayout lockRow = new LinearLayout(c);
+            LinearLayout lockRow = Ui.group(c);
+            lockRow.setOrientation(LinearLayout.HORIZONTAL);
             lockRow.setGravity(Gravity.CENTER_VERTICAL);
-            card.addView(lockRow, Ui.lp(-1, -2, Ui.dpi(c, 24)));
+            card.addView(lockRow, Ui.lp(-1, -2, Ui.dpi(c, 10)));
             LinearLayout lockText = new LinearLayout(c);
             lockText.setOrientation(LinearLayout.VERTICAL);
             lockRow.addView(lockText, new LinearLayout.LayoutParams(0, -2, 1f));
@@ -368,6 +376,7 @@ final class WallpaperUi {
             Ui.pressable(back);
             bar.addView(back, Ui.lp(Ui.dpi(c, 44), Ui.dpi(c, 44)));
             TextView title = Ui.text(c, "Wallpapers", 22, Ui.FG, true);
+            title.setTypeface(Ui.font(c, 700));
             LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(0, -2, 1f);
             tp.leftMargin = Ui.dpi(c, 4);
             bar.addView(title, tp);
