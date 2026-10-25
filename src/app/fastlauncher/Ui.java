@@ -27,16 +27,41 @@ import android.widget.TextView;
 final class Ui {
     private Ui() {}
 
-    static final int FG = 0xFFFFFFFF;
-    static final int FG2 = 0xA6FFFFFF;
-    static final int FG3 = 0x66FFFFFF;
-    static final int CARD = 0xFF16171A;
-    static final int FILL = 0x1AFFFFFF;
-    static final int INK = 0xFF111214;
-    static final int DANGER = 0xFFFF6B60;
-    static final int DANGER_BG = 0x2EFF453A;
-    static final int ACCENT = 0xFF2F7CF6;
-    static final int GROUP = 0xFF212328;
+    // Palette for every surface the launcher draws over its own background (panels, menus,
+    // sheets). It matches the system's own pop-ups, sampled from the phone's Wi-Fi panel, and
+    // follows light/dark mode. Anything drawn straight on the wallpaper stays white.
+    static boolean dark = true;
+    static int FG, FG2, FG3, CARD, GROUP, FILL, ICON_BG, LINE, PRESS, HANDLE, SCRIM, BG,
+            TRACK, STRONG, ON_STRONG, INK, ACCENT, DANGER, DANGER_BG;
+
+    static { apply(true); }
+
+    /** Call before building any themed view, and again when the system switches modes. */
+    static boolean theme(Context c) {
+        int night = c.getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
+        boolean d = night != android.content.res.Configuration.UI_MODE_NIGHT_NO;
+        boolean changed = d != dark;
+        apply(d);
+        return changed;
+    }
+
+    private static void apply(boolean d) {
+        dark = d;
+        if (d) {
+            CARD = 0xFF2E2E2E; GROUP = 0xFF3A3A3A; FILL = 0xFF424242; ICON_BG = 0xFF4A4A4A;
+            FG = 0xFFEAEAEA; FG2 = 0xFFA9A9A9; FG3 = 0xFF8C8C8C;
+            LINE = 0xFF424242; PRESS = 0x1FFFFFFF; HANDLE = 0x52FFFFFF; SCRIM = 0xB3000000; BG = 0xFF1F1F1F;
+            TRACK = 0xFF4E4E4E; STRONG = 0xFFEAEAEA; ON_STRONG = 0xFF191919;
+            ACCENT = 0xFF3D7FFF; DANGER = 0xFFFF6B60; DANGER_BG = 0x33FF453A;
+        } else {
+            CARD = 0xFFFFFFFF; GROUP = 0xFFF1F2F4; FILL = 0xFFEBECEF; ICON_BG = 0xFFFFFFFF;
+            FG = 0xFF191919; FG2 = 0xFF5F6368; FG3 = 0xFF8A8F96;
+            LINE = 0xFFEDEDED; PRESS = 0x14000000; HANDLE = 0x33000000; SCRIM = 0x73000000; BG = 0xFFF5F6F8;
+            TRACK = 0xFFD5D8DD; STRONG = 0xFF256FFF; ON_STRONG = 0xFFFFFFFF;
+            ACCENT = 0xFF256FFF; DANGER = 0xFFE5392F; DANGER_BG = 0x1FE5392F;
+        }
+        INK = ON_STRONG;
+    }
     static final Typeface MEDIUM = Typeface.create("sans-serif-medium", Typeface.NORMAL);
     static final Typeface REGULAR = Typeface.create("sans-serif", Typeface.NORMAL);
     static final Interpolator EMPHASIZED = new PathInterpolator(0.05f, 0.7f, 0.1f, 1f);
@@ -274,8 +299,8 @@ final class Ui {
             int h = dpi(c, 48);
             setMinimumHeight(h);
             setPadding(dpi(c, 18), 0, dpi(c, 20), 0);
-            setBackground(round(primary ? ACCENT : 0x24FFFFFF, h / 2f));
-            int fg = FG;
+            setBackground(round(primary ? ACCENT : FILL, h / 2f));
+            int fg = primary ? Color.WHITE : FG;
             glyph = new Glyph(c, glyphType, fg);
             addView(glyph, lp(dpi(c, 20), dpi(c, 20)));
             label = text(c, text, 15, fg, true);
@@ -320,7 +345,7 @@ final class Ui {
             on = v;
             float r = dp(getContext(), 19);
             setBackground(round(v ? ACCENT : FILL, r));
-            setTextColor(FG);
+            setTextColor(v ? Color.WHITE : FG);
         }
     }
 
@@ -397,7 +422,7 @@ final class Ui {
             c.drawRoundRect(x + inset, inset, x + seg - inset, h - inset, r - inset, r - inset, thumb);
             for (int i = 0; i < options.length; i++) {
                 float d = Math.max(0f, 1f - Math.abs(pos - i));
-                text.setColor(blend(FG2, FG, d));
+                text.setColor(blend(FG2, Color.WHITE, d));
                 c.drawText(options[i], seg * (i + 0.5f), h / 2f + text.getTextSize() * 0.36f, text);
             }
         }
@@ -457,7 +482,7 @@ final class Ui {
 
         @Override protected void onDraw(Canvas c) {
             float w = getWidth(), h = getHeight(), r = h / 2f, in = dp(getContext(), 3);
-            p.setColor(blend(0x33FFFFFF, ACCENT, pos));
+            p.setColor(blend(TRACK, ACCENT, pos));
             c.drawRoundRect(0, 0, w, h, r, r, p);
             float cx = r + (w - 2 * r) * pos;
             p.setColor(Color.WHITE);
@@ -479,7 +504,7 @@ final class Ui {
         RoundImage(Context c, float radiusPx) {
             super(c);
             radius = radiusPx;
-            ph.setColor(0xFF24262B);
+            ph.setColor(GROUP);
         }
 
         void setPlaceholder(int color) { ph.setColor(color); invalidate(); }

@@ -154,6 +154,7 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
 
     private void ensurePanel() {
         if (panel != null) return;
+        Ui.theme(this);
         panel = new ControlPanel(this, this);
         // Full-size from the start but fully transparent and untouchable while hidden: the
         // compositor skips a window with alpha 0, and a pull never has to resize or re-lay out.
@@ -201,7 +202,20 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
         try { startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); } catch (Exception ignored) {}
     }
 
-    @Override public void globalAction(int action) { performGlobalAction(action); }
+    @Override public void globalAction(int action) {
+        performGlobalAction(action);
+    }
+
+    /** Light/dark switched: rebuild the (hidden) panel in the new palette. */
+    @Override public void onConfigurationChanged(android.content.res.Configuration c) {
+        super.onConfigurationChanged(c);
+        Ui.theme(this); // the launcher may have flipped the shared palette first
+        if (panel == null || panel.isDark == Ui.dark || panelOpen) return;
+        try { wm.removeView(panel); } catch (Exception ignored) {}
+        panel.unbind();
+        panel = null;
+        ensurePanel();
+    }
 
     @Override public int statusBarHeight() { return statusH; }
 }

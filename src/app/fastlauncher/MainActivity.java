@@ -108,6 +108,8 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
+        Ui.theme(this);
+        builtDark = Ui.dark;
         dp = getResources().getDisplayMetrics().density;
         iconPx = Math.round(48 * dp);
         prefs = getSharedPreferences("launcher", MODE_PRIVATE);
@@ -166,6 +168,16 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             if (what != null) debugWallpaper(what);
         }
     };
+
+    @Override public void onConfigurationChanged(android.content.res.Configuration c) {
+        super.onConfigurationChanged(c);
+        // light/dark switched: rebuild with the new palette (icons come from the cache instantly)
+        // (compare with what this activity was built in: the panel service may flip the shared palette first)
+        Ui.theme(this);
+        if (builtDark != Ui.dark) recreate();
+    }
+
+    private boolean builtDark;
 
     @Override protected void onDestroy() {
         unregisterReceiver(pkgReceiver);
@@ -238,6 +250,9 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
     @Override protected void onResume() {
         super.onResume();
+        // a light/dark switch that happened while we were in the background
+        Ui.theme(this);
+        if (builtDark != Ui.dark) { recreate(); return; }
         NotifService.listener = notifChanged;
         pushBadges();
         clock.removeCallbacks(tick);
@@ -1065,7 +1080,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private void snack(String msg, long ms) {
         if (snackView == null) {
             snackView = Ui.text(this, "", 14, Ui.FG, true);
-            snackView.setBackground(Ui.round(0xF0202226, dpi(22)));
+            snackView.setBackground(Ui.round(Ui.CARD, dpi(22)));
             snackView.setPadding(dpi(18), dpi(13), dpi(18), dpi(13));
             snackView.setGravity(Gravity.CENTER);
         }
@@ -1177,10 +1192,10 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 @Override public boolean hasOverlappingRendering() { return false; }
             };
             card.setOrientation(LinearLayout.VERTICAL);
-            card.setBackground(Ui.round(0xFF1B1D21, Ui.dp(c, 28)));
+            card.setBackground(Ui.round(Ui.CARD, Ui.dp(c, 28)));
             card.setPadding(0, Ui.dpi(c, 6), 0, Ui.dpi(c, 10));
-            android.graphics.drawable.GradientDrawable cardBg = Ui.round(0xFF1B1D21, Ui.dp(c, 28));
-            cardBg.setStroke(Math.max(1, Ui.dpi(c, 1)), 0x14FFFFFF);
+            android.graphics.drawable.GradientDrawable cardBg = Ui.round(Ui.CARD, Ui.dp(c, 28));
+            cardBg.setStroke(Math.max(1, Ui.dpi(c, 1)), Ui.LINE);
             card.setBackground(cardBg);
             card.setClipToOutline(true);
 
@@ -1202,7 +1217,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             head.addView(name, new LinearLayout.LayoutParams(0, -2, 1f));
             for (final Btn b : btns) {
                 Ui.Glyph g = new Ui.Glyph(c, b.glyph, b.tone == DANGER ? Ui.DANGER : Ui.FG);
-                g.setBackground(Ui.round(b.tone == DANGER ? Ui.DANGER_BG : 0x1FFFFFFF, Ui.dp(c, 20)));
+                g.setBackground(Ui.round(b.tone == DANGER ? Ui.DANGER_BG : Ui.FILL, Ui.dp(c, 20)));
                 g.setPadding(Ui.dpi(c, 10), Ui.dpi(c, 10), Ui.dpi(c, 10), Ui.dpi(c, 10));
                 g.setClickable(true);
                 Ui.pressable(g);
@@ -1216,7 +1231,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             // shortcuts / list rows
             if (!items.isEmpty()) {
                 View line = new View(c);
-                line.setBackgroundColor(0x14FFFFFF);
+                line.setBackgroundColor(Ui.LINE);
                 LinearLayout.LayoutParams dl = Ui.lp(-1, Math.max(1, Ui.dpi(c, 1)));
                 dl.leftMargin = dl.rightMargin = Ui.dpi(c, 16);
                 dl.bottomMargin = Ui.dpi(c, 4);
@@ -1240,7 +1255,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 t.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 row.addView(t, new LinearLayout.LayoutParams(0, -2, 1f));
                 row.setOnTouchListener((v, ev) -> {
-                    if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) v.setBackground(Ui.round(0x1AFFFFFF, Ui.dp(c, 16)));
+                    if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) v.setBackground(Ui.round(Ui.PRESS, Ui.dp(c, 16)));
                     else if (ev.getActionMasked() == MotionEvent.ACTION_UP || ev.getActionMasked() == MotionEvent.ACTION_CANCEL)
                         v.setBackground(Ui.round(0x00000000, Ui.dp(c, 16)));
                     return false;
@@ -1255,8 +1270,8 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             if (primary != null) {
                 LinearLayout pill = new LinearLayout(c);
                 pill.setGravity(Gravity.CENTER);
-                int bg = primary.tone == DANGER ? Ui.DANGER_BG : primary.tone == ACCENT ? Ui.ACCENT : 0x1FFFFFFF;
-                int fg = primary.tone == DANGER ? Ui.DANGER : Ui.FG;
+                int bg = primary.tone == DANGER ? Ui.DANGER_BG : primary.tone == ACCENT ? Ui.ACCENT : Ui.FILL;
+                int fg = primary.tone == DANGER ? Ui.DANGER : primary.tone == ACCENT ? Color.WHITE : Ui.FG;
                 pill.setBackground(Ui.round(bg, Ui.dp(c, 23)));
                 if (primary.glyph >= 0) {
                     pill.addView(new Ui.Glyph(c, primary.glyph, fg), Ui.lp(Ui.dpi(c, 20), Ui.dpi(c, 20)));

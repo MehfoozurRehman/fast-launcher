@@ -133,7 +133,7 @@ final class WallpaperUi {
             Context c = getContext();
             slop = ViewConfiguration.get(c).getScaledTouchSlop();
             backdrop = new View(c);
-            backdrop.setBackgroundColor(0x8C000000);
+            backdrop.setBackgroundColor(Ui.SCRIM);
             backdrop.setAlpha(0f);
             backdrop.setOnClickListener(v -> close());
             addView(backdrop, new FrameLayout.LayoutParams(-1, -1));
@@ -151,7 +151,7 @@ final class WallpaperUi {
             addView(card, clp);
 
             View handle = new View(c);
-            handle.setBackground(Ui.round(0x40FFFFFF, Ui.dp(c, 2)));
+            handle.setBackground(Ui.round(Ui.HANDLE, Ui.dp(c, 2)));
             LinearLayout.LayoutParams hp = Ui.lp(Ui.dpi(c, 36), Ui.dpi(c, 4));
             hp.gravity = Gravity.CENTER_HORIZONTAL;
             hp.bottomMargin = Ui.dpi(c, 14);
@@ -394,13 +394,13 @@ final class WallpaperUi {
         Browser(Host h) {
             super(h);
             Context c = getContext();
-            setBackgroundColor(0xFF0D0E11);
+            setBackgroundColor(Ui.BG);
             thumbs = new Thumbs(() -> { if (grid != null) grid.invalidate(); });
 
             LinearLayout top = new LinearLayout(c);
             top.setOrientation(LinearLayout.VERTICAL);
             top.setPadding(0, h.insetTop() + Ui.dpi(c, 6), 0, Ui.dpi(c, 10));
-            top.setBackgroundColor(0xF20D0E11);
+            top.setBackgroundColor((Ui.BG & 0x00FFFFFF) | 0xF2000000);
 
             LinearLayout bar = new LinearLayout(c);
             bar.setGravity(Gravity.CENTER_VERTICAL);
@@ -617,7 +617,7 @@ final class WallpaperUi {
                         float x = side + col * (cw + gap), y = topInset + r * rh - off;
                         if (skeleton && items.isEmpty()) {
                             float pulse = 0.5f + 0.5f * (float) Math.sin((now + i * 90) / 260.0);
-                            ph.setColor(Ui.blend(0xFF17181C, 0xFF22242A, pulse));
+                            ph.setColor(Ui.blend(Ui.GROUP, Ui.FILL, pulse));
                             c.drawRoundRect(x, y, x + cw, y + ch, radius, radius, ph);
                             animating = true;
                             continue;
@@ -808,7 +808,7 @@ final class WallpaperUi {
         }
 
         private static Ui.Glyph roundGlyph(Context c, int type) {
-            Ui.Glyph g = new Ui.Glyph(c, type, Ui.FG);
+            Ui.Glyph g = new Ui.Glyph(c, type, Color.WHITE); // sits on the wallpaper image
             g.setBackground(Ui.round(0x59000000, Ui.dp(c, 22)));
             g.setPadding(Ui.dpi(c, 10), Ui.dpi(c, 10), Ui.dpi(c, 10), Ui.dpi(c, 10));
             g.setClickable(true);
