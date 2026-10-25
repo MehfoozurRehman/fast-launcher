@@ -215,6 +215,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         pushBadges();
         clock.removeCallbacks(tick);
         showWeather();
+        updateHeader();
         tick.run();
         Walls.cover = cover;
         // Backstop for the scheduled job, which OEM battery managers like to delay.
@@ -364,8 +365,8 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         drawer.addView(grid, new FrameLayout.LayoutParams(-1, -1, Gravity.TOP));
 
         title = new TextView(this);
-        title.setText("All apps");
         title.setTextColor(Color.WHITE);
+        title.setLineSpacing(dpi(4), 1f);
         title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 28);
         title.setTypeface(Ui.MEDIUM);
         title.setIncludeFontPadding(false);
@@ -428,7 +429,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         bp.rightMargin = dpi(14);
         btnSearch.setLayoutParams(bp);
         FrameLayout.LayoutParams gp = (FrameLayout.LayoutParams) grid.getLayoutParams();
-        gp.topMargin = insetTop + dpi(74);
+        gp.topMargin = insetTop + dpi(92);
         grid.setLayoutParams(gp);
         grid.setBottomInset(insetBottom);
     }
@@ -794,6 +795,28 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         hideSnack();
     }
 
+    // ================================================================ drawer header
+
+    /** A greeting for the time of day, with a quiet live line under it. */
+    private void updateHeader() {
+        int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+        String greet = h >= 5 && h < 12 ? "Good morning" : h >= 12 && h < 17 ? "Good afternoon"
+                : h >= 17 && h < 22 ? "Good evening" : "Late night";
+        int unread = 0;
+        for (Integer n : NotifService.counts.values()) unread += n;
+        StringBuilder sub = new StringBuilder();
+        sub.append(all.size()).append(" apps");
+        if (unread > 0) sub.append("  ·  ").append(unread).append(unread == 1 ? " notification" : " notifications");
+        Weather.Now w = Weather.cached(this);
+        if (w != null) sub.append("  ·  ").append(w.tempC).append("°C");
+        android.text.SpannableString s = new android.text.SpannableString(greet + '\n' + sub);
+        int from = greet.length() + 1;
+        s.setSpan(new android.text.style.RelativeSizeSpan(0.5f), from, s.length(), 0);
+        s.setSpan(new android.text.style.ForegroundColorSpan(0xB3FFFFFF), from, s.length(), 0);
+        s.setSpan(new android.text.style.TypefaceSpan("sans-serif"), from, s.length(), 0);
+        title.setText(s);
+    }
+
     // ================================================================ search
 
     private void beginSearch() {
@@ -1027,7 +1050,10 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 home.setScaleY(1f);
                 return;
             }
-            if (drawer.getVisibility() != View.VISIBLE) drawer.setVisibility(View.VISIBLE);
+            if (drawer.getVisibility() != View.VISIBLE) {
+                updateHeader();
+                drawer.setVisibility(View.VISIBLE);
+            }
             if (blurView.hasBlur() && blurView.getVisibility() != View.VISIBLE) blurView.setVisibility(View.VISIBLE);
             // the sheet travels a third of the screen while the rows cascade in behind it
             float e = 1f - progress;
