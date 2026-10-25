@@ -91,6 +91,8 @@ final class Diag {
     static void repair(Context c) {
         try {
             if (c.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) != PackageManager.PERMISSION_GRANTED) return;
+            // switched off by the user in Settings (not by a force-stop): leave it off
+            if (c.getSharedPreferences("panel", Context.MODE_PRIVATE).getBoolean("userOff", false)) return;
             String list = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
             String me = PANEL.flattenToString();
             if (list != null && (list.contains(me) || list.contains(PANEL.flattenToShortString()))) return;
@@ -130,6 +132,8 @@ final class Diag {
         line(sb, "nearby devices (Bluetooth)", granted(c, Manifest.permission.BLUETOOTH_CONNECT));
         line(sb, "location (weather)", granted(c, Manifest.permission.ACCESS_COARSE_LOCATION));
         line(sb, "self-repair allowed", granted(c, Manifest.permission.WRITE_SECURE_SETTINGS));
+        line(sb, "notifications (recorder's Stop)", granted(c, Manifest.permission.POST_NOTIFICATIONS));
+        line(sb, "can read any wallpaper (blur)", Build.VERSION.SDK_INT < 30 || android.os.Environment.isExternalStorageManager());
         try {
             line(sb, "not battery-restricted", ((PowerManager) c.getSystemService(Context.POWER_SERVICE)).isIgnoringBatteryOptimizations(c.getPackageName()));
         } catch (Exception ignored) {}

@@ -80,7 +80,7 @@ final class AppGridView extends View {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable longPress = new Runnable() {
         @Override public void run() {
-            if (pressedIndex < 0 || dragging || listener == null) return;
+            if (pressedIndex < 0 || pressedIndex >= items.size() || dragging || listener == null) return;
             longFired = true;
             performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
             float[] c = cellCenter(pressedIndex);
@@ -156,6 +156,9 @@ final class AppGridView extends View {
     void setBottomInset(int px) { bottomPad = px + 14 * density; invalidate(); }
 
     void setItems(List<AppEntry> list) {
+        // an install/uninstall can swap the list while a finger is down: forget that press
+        handler.removeCallbacks(longPress);
+        pressedIndex = -1;
         items = list;
         off = 0;
         if (scroller != null) scroller.forceFinished(true);
@@ -353,7 +356,7 @@ final class AppGridView extends View {
                     if (Math.abs(v) > minFling) {
                         scroller.fling(0, (int) off, 0, (int) -v, 0, 0, 0, (int) maxOff());
                     }
-                } else if (!longFired && pressedIndex >= 0 && listener != null
+                } else if (!longFired && pressedIndex >= 0 && pressedIndex < items.size() && listener != null
                         && Math.abs(ev.getX() - downX) < slop * 2 && Math.abs(ev.getY() - downY) < slop * 2) {
                     listener.onTap(items.get(pressedIndex), pressedIndex);
                 } else if (pressedIndex < 0 && footer != null && listener != null

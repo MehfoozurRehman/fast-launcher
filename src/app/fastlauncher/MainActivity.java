@@ -87,8 +87,9 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
     /** Survives activity recreation (theme/wallpaper changes), so icons never blink. */
     private static final List<AppGridView.AppEntry> CACHE = new ArrayList<>();
-    /** Which look (dark/light plates) the icons in CACHE were drawn with. */
+    /** Which look (dark/light plates) and size the icons in CACHE were drawn with. */
     private static boolean cacheDark = Ui.dark;
+    private static int cacheSize;
     private final List<AppGridView.AppEntry> all = new ArrayList<>();
     private List<AppGridView.AppEntry> drawerApps = new ArrayList<>();
     private List<AppGridView.AppEntry> shown = drawerApps;
@@ -115,6 +116,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         Diag.install(this);
         Ui.theme(this);
         builtDark = Ui.dark;
+        builtConfig = new android.content.res.Configuration(getResources().getConfiguration());
         dp = getResources().getDisplayMetrics().density;
         iconPx = Math.round(48 * dp);
         prefs = getSharedPreferences("launcher", MODE_PRIVATE);
@@ -181,17 +183,71 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 });
                 return;
             }
+            if ("testnotif".equals(what)) { postTestNotification(); return; }
+            if ("gc".equals(what)) { // leak checks: count only what's really still referenced
+                for (int k = 0; k < 3; k++) { Runtime.getRuntime().gc(); System.runFinalization(); }
+                return;
+            }
             if (what != null) debugWallpaper(what);
         }
     };
+
+    /**
+     * adb-only test: a notification with Reply and Mark as read buttons, to check the panel's
+     * notification actions end to end. The reply lands in the launcher log ("test reply: ...").
+     */
+    private void postTestNotification() {
+        android.app.NotificationManager nm = (android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        nm.createNotificationChannel(new android.app.NotificationChannel(NotifService.TEST_CHANNEL, "Tests",
+                android.app.NotificationManager.IMPORTANCE_LOW));
+        String act = getPackageName() + ".TEST_REPLY";
+        if (!testReceiverOn) {
+            testReceiverOn = true;
+            IntentFilter f = new IntentFilter(act);
+            BroadcastReceiver r = new BroadcastReceiver() {
+                @Override public void onReceive(Context c, Intent i) {
+                    android.os.Bundle in = android.app.RemoteInput.getResultsFromIntent(i);
+                    CharSequence text = in == null ? null : in.getCharSequence("text");
+                    Diag.log("test " + (text != null ? "reply: " + text : "action: " + i.getStringExtra("which")));
+                    ((android.app.NotificationManager) c.getSystemService(NOTIFICATION_SERVICE)).cancel(77);
+                }
+            };
+            if (Build.VERSION.SDK_INT >= 33) getApplicationContext().registerReceiver(r, f, Context.RECEIVER_NOT_EXPORTED);
+            else getApplicationContext().registerReceiver(r, f);
+        }
+        android.app.PendingIntent reply = android.app.PendingIntent.getBroadcast(this, 1,
+                new Intent(act).setPackage(getPackageName()).putExtra("which", "reply"),
+                android.app.PendingIntent.FLAG_MUTABLE | android.app.PendingIntent.FLAG_UPDATE_CURRENT);
+        android.app.PendingIntent read = android.app.PendingIntent.getBroadcast(this, 2,
+                new Intent(act).setPackage(getPackageName()).putExtra("which", "mark read"),
+                android.app.PendingIntent.FLAG_IMMUTABLE | android.app.PendingIntent.FLAG_UPDATE_CURRENT);
+        android.app.Notification n = new android.app.Notification.Builder(this, NotifService.TEST_CHANNEL)
+                .setSmallIcon(android.R.drawable.sym_action_chat)
+                .setContentTitle("Test message")
+                .setContentText("Reply from the panel to test it")
+                .addAction(new android.app.Notification.Action.Builder(null, "Reply", reply)
+                        .addRemoteInput(new android.app.RemoteInput.Builder("text").setLabel("Reply").build())
+                        .setSemanticAction(android.app.Notification.Action.SEMANTIC_ACTION_REPLY).build())
+                .addAction(new android.app.Notification.Action.Builder(null, "Mark as read", read)
+                        .setSemanticAction(android.app.Notification.Action.SEMANTIC_ACTION_MARK_AS_READ).build())
+                .build();
+        nm.notify(77, n);
+    }
+
+    private static boolean testReceiverOn;
 
     @Override public void onConfigurationChanged(android.content.res.Configuration c) {
         super.onConfigurationChanged(c);
         // light/dark switched: rebuild with the new palette (icons come from the cache instantly)
         // (compare with what this activity was built in: the panel service may flip the shared palette first)
         Ui.theme(this);
-        if (builtDark != Ui.dark) recreate();
+        // font size, display size or language changed too: everything is sized in onCreate
+        android.content.res.Configuration was = builtConfig;
+        if (builtDark != Ui.dark || was == null || was.fontScale != c.fontScale || was.densityDpi != c.densityDpi
+                || !was.getLocales().equals(c.getLocales())) recreate();
     }
+
+    private android.content.res.Configuration builtConfig;
 
     private boolean builtDark;
 
@@ -273,6 +329,14 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         // put the panel's service back if a phone cleaner force-stopped us (Android turns it off)
         final Context appCtx = getApplicationContext();
         wallWorker.execute(() -> Diag.repair(appCtx));
+        // notification access granted but not connected (Honor may drop listeners): ask again
+        if (NotifService.running == null) {
+            String l = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
+            if (l != null && l.contains(getPackageName())) {
+                try { android.service.notification.NotificationListenerService.requestRebind(
+                        new ComponentName(this, NotifService.class)); } catch (Exception ignored) {}
+            }
+        }
         pushBadges();
         clock.removeCallbacks(tick);
         showWeather();
@@ -283,7 +347,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         // Backstop for the scheduled job, which OEM battery managers like to delay.
         if (Walls.due(this) && !Walls.isBusy()) {
             final Context app = getApplicationContext();
-            wallWorker.execute(() -> { try { Walls.next(app, false); } catch (Exception ignored) {} });
+            wallWorker.execute(() -> { try { if (Walls.due(app)) Walls.next(app, false); } catch (Exception ignored) {} });
         }
     }
 
@@ -733,17 +797,22 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             int n = 0;
             // light/dark switched: swap each icon for the other look as it's ready (the old one
             // stays on screen meanwhile, so nothing blinks)
-            final boolean restyle = cacheDark != Ui.dark;
-            cacheDark = Ui.dark;
+            // (display size changed: same thing, the icons are redrawn at the new size)
+            final boolean dark = Ui.dark;
+            final boolean restyle = cacheDark != dark || cacheSize != iconPx;
             for (AppGridView.AppEntry e : order) {
-                if (gen != loadGen) return;
-                if (e.icon == null || restyle) e.icon = Icons.load(this, pm, e.ai, iconPx, used);
+                if (gen != loadGen) return; // aborted: the next pass still sees the old style and redoes it
+                if (e.icon == null || restyle) e.icon = Icons.load(this, pm, e.ai, iconPx, used, dark);
                 else Icons.markUsed(this, e.ai, iconPx, used);
                 if (++n % 8 == 0) { grid.postInvalidate(); dock.postInvalidate(); }
             }
             grid.postInvalidate();
             dock.postInvalidate();
-            if (gen == loadGen) Icons.prune(this, used);
+            if (gen == loadGen) {
+                cacheDark = dark; // the whole pass is done: now the cache really is this style
+                cacheSize = iconPx;
+                Icons.prune(this, used);
+            }
             main.post(this::warmDrawer);
         });
     }

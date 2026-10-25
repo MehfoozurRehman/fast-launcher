@@ -71,7 +71,8 @@ final class Agenda {
     private static String time(long ms) {
         Calendar c = Calendar.getInstance();
         c.setTimeInMillis(ms);
-        String t = MainActivity.clockText(c);
+        // the home clock has no am/pm, but an alarm or event time needs one ("7:00" which?)
+        String t = MainActivity.clockText(c) + (c.get(Calendar.AM_PM) == Calendar.AM ? " am" : " pm");
         Calendar today = Calendar.getInstance();
         if (c.get(Calendar.DAY_OF_YEAR) != today.get(Calendar.DAY_OF_YEAR)) t = "tomorrow " + t;
         return t;

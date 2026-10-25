@@ -79,14 +79,15 @@ final class Icons {
     }
 
     /** Disk-cached icon. Returns a GPU (HARDWARE) bitmap when possible. */
-    static Bitmap load(Context c, PackageManager pm, ActivityInfo ai, int size, Set<String> used) {
-        File f = cacheFile(c, ai, size, Ui.dark);
+    /** dark: which plate to draw, fixed for a whole loading pass (the theme may flip midway). */
+    static Bitmap load(Context c, PackageManager pm, ActivityInfo ai, int size, Set<String> used, boolean dark) {
+        File f = cacheFile(c, ai, size, dark);
         if (used != null) markUsed(c, ai, size, used);
         if (f.exists()) {
             Bitmap b = readRaw(f);
             if (b != null) return toHardware(b);
         }
-        Bitmap b = render(c, pm, ai, size);
+        Bitmap b = render(c, pm, ai, size, dark);
         if (b == null) return null;
         writeRaw(f, b);
         return toHardware(b);
@@ -196,7 +197,7 @@ final class Icons {
         return null;
     }
 
-    static Bitmap render(Context c, PackageManager pm, ActivityInfo ai, int size) {
+    static Bitmap render(Context c, PackageManager pm, ActivityInfo ai, int size, boolean dark) {
         Drawable d = raw(pm, ai);
         if (d == null) {
             try { d = ai.loadIcon(pm); } catch (Throwable t) { return null; }
@@ -216,7 +217,6 @@ final class Icons {
         Canvas cv = new Canvas(out);
 
         // the plate, with a soft drop shadow: white in light mode, near-black in dark mode
-        boolean dark = Ui.dark;
         int top = dark ? 0xFF2B2C2F : 0xFFFFFFFF, bottom = dark ? 0xFF16171A : 0xFFEDEFF3;
         Path plate = blob(cx, cy, plateR - density * 0.5f, seed, 0f);
         Paint shadow = new Paint(Paint.ANTI_ALIAS_FLAG);

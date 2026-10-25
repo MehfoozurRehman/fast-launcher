@@ -142,8 +142,11 @@ final class Recorder {
         }
 
         private void stop() {
+            // a recording that never started, or was stopped before the first frame, isn't a
+            // video: delete it instead of leaving a broken file in the gallery
+            boolean good = recording;
             if (rec != null) {
-                try { rec.stop(); } catch (Exception ignored) {}
+                try { rec.stop(); } catch (Exception e) { good = false; }
                 rec.release();
                 rec = null;
             }
@@ -152,9 +155,15 @@ final class Recorder {
             try { if (pfd != null) pfd.close(); } catch (Exception ignored) {}
             pfd = null;
             if (out != null) {
-                ContentValues v = new ContentValues();
-                v.put(MediaStore.Video.Media.IS_PENDING, 0);
-                try { getContentResolver().update(out, v, null, null); } catch (Exception ignored) {}
+                try {
+                    if (good) {
+                        ContentValues v = new ContentValues();
+                        v.put(MediaStore.Video.Media.IS_PENDING, 0);
+                        getContentResolver().update(out, v, null, null);
+                    } else {
+                        getContentResolver().delete(out, null, null);
+                    }
+                } catch (Exception ignored) {}
                 out = null;
             }
             recording = false;

@@ -400,6 +400,26 @@ final class Walls {
         } catch (Exception ignored) {}
     }
 
+    /** The current home wallpaper as a bitmap, or null when Android won't let us read it. */
+    private static Bitmap systemWallpaper(Context c) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return null;
+            android.graphics.drawable.Drawable d = WallpaperManager.getInstance(c).getDrawable();
+            if (d == null) return null;
+            if (d instanceof android.graphics.drawable.BitmapDrawable) {
+                Bitmap b = ((android.graphics.drawable.BitmapDrawable) d).getBitmap();
+                return b == null ? null : b.copy(Bitmap.Config.ARGB_8888, false);
+            }
+            int w = Math.max(1, Math.min(1080, d.getIntrinsicWidth())), h = Math.max(1, Math.min(2400, d.getIntrinsicHeight()));
+            Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            d.setBounds(0, 0, w, h);
+            d.draw(new Canvas(b));
+            return b;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     /** The blur for the current wallpaper, or null if the wallpaper wasn't set by us. */
     /** The drawer backdrop, already darkened where needed, plus how bright the wallpaper's top is. */
     static final class Blur {
@@ -412,10 +432,19 @@ final class Walls {
         SharedPreferences p = prefs(c);
         int id = wallpaperId(c);
         if (!blurFile(c).exists() || p.getInt("blurFor", -2) != id) {
-            // first run after an update: the current wallpaper may be ours but unblurred
-            Wall cur = current(c);
-            if (cur == null || p.contains("blurFor")) return null;
-            saveBlur(c, cur, null);
+            // not one of ours (a photo set from the gallery, say): blur the system's wallpaper
+            // itself; reading it needs all-files access on Android 13+ (granted once over adb)
+            Bitmap sys = systemWallpaper(c);
+            if (sys != null) {
+                saveBlur(c, null, sys);
+                sys.recycle();
+                try { WallpaperManager.getInstance(c).forgetLoadedWallpaper(); } catch (Exception ignored) {}
+            } else {
+                // first run after an update: the current wallpaper may be ours but unblurred
+                Wall cur = current(c);
+                if (cur == null || p.contains("blurFor")) return null;
+                saveBlur(c, cur, null);
+            }
             if (!blurFile(c).exists()) return null;
         }
         BitmapFactory.Options o = new BitmapFactory.Options();

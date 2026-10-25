@@ -43,16 +43,20 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
     @Override protected void onServiceConnected() {
         Diag.install(this);
         running = this;
+        // connected: whatever turned us off before, the user wants the panel now
+        getSharedPreferences("panel", MODE_PRIVATE).edit().putBoolean("userOff", false).apply();
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
         statusH = id > 0 ? getResources().getDimensionPixelSize(id) : Ui.dpi(this, 32);
 
         IntentFilter f = new IntentFilter();
         f.addAction(Intent.ACTION_SCREEN_OFF);
+        f.addAction(Intent.ACTION_SCREEN_ON);
         f.addAction(Intent.ACTION_USER_PRESENT);
         registerReceiver(screen, f);
 
         KeyguardManager km = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
+        lastConfig = new android.content.res.Configuration(getResources().getConfiguration());
         if (km == null || !km.isKeyguardLocked()) addStrip();
         ensurePanel();
     }
@@ -63,11 +67,33 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
             if (Intent.ACTION_SCREEN_OFF.equals(i.getAction())) {
                 if (panelOpen) finishHide();
                 removeStrip();
-            } else {
+            } else if (Intent.ACTION_USER_PRESENT.equals(i.getAction()) || !locked()) {
+                // woken within the lock grace period there's no unlock (and no USER_PRESENT):
+                // screen on while not locked counts too
                 addStrip();
             }
         }
     };
+
+    private boolean locked() {
+        KeyguardManager km = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
+        return km != null && km.isKeyguardLocked();
+    }
+
+    /**
+     * Unbound while the process is alive means the user switched "Fast Launcher controls" off
+     * in Settings: remember it, so self-repair doesn't switch it back on behind their back.
+     * (A force-stop kills the process without this call, and that case does get repaired.)
+     */
+    @Override public boolean onUnbind(Intent intent) {
+        // updates and shutdowns unbind too, but leave the setting on: only an actual switch-off counts
+        String on = android.provider.Settings.Secure.getString(getContentResolver(),
+                android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        if (on == null || !on.contains(getPackageName())) {
+            getSharedPreferences("panel", MODE_PRIVATE).edit().putBoolean("userOff", true).commit();
+        }
+        return super.onUnbind(intent);
+    }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {}
     @Override public void onInterrupt() {}
@@ -85,16 +111,25 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
         try { unregisterReceiver(screen); } catch (Exception ignored) {}
         removeStrip();
         if (panel != null) {
-            panel.unbind();
+            panel.destroy();
             try { wm.removeView(panel); } catch (Exception ignored) {}
+            panel = null;
         }
         super.onDestroy();
     }
 
     // ================================================================ trigger strip
 
+    private android.content.res.Configuration lastConfig;
+
+    private boolean landscape() {
+        return getResources().getConfiguration().orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE;
+    }
+
     private void addStrip() {
-        if (strip != null || wm == null) return;
+        // in landscape (games, videos) the system's own pull-down stays in charge: our strip is
+        // sized for portrait, and full-screen apps keep their top edge
+        if (strip != null || wm == null || landscape()) return;
         strip = new Strip(this);
         int w = getResources().getDisplayMetrics().widthPixels;
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
@@ -241,6 +276,8 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
                     if (pulling) {
                         vt.computeCurrentVelocity(1000);
                         panel.settle(vt.getYVelocity());
+                    } else if (!panelOpen) {
+                        panel.unbind(); // just a tap on the status bar: don't keep following the media session
                     }
                     pulling = false;
                     vt.recycle();
@@ -311,11 +348,32 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
     @Override public void onConfigurationChanged(android.content.res.Configuration c) {
         super.onConfigurationChanged(c);
         Ui.theme(this); // the launcher may have flipped the shared palette first
-        if (panel == null || panel.isDark == Ui.dark || panelOpen) return;
+        android.content.res.Configuration was = lastConfig;
+        lastConfig = new android.content.res.Configuration(c);
+        // rotated: the strip goes (landscape) or comes back, re-measured for the new width
+        if (was == null || was.orientation != c.orientation || was.screenWidthDp != c.screenWidthDp) {
+            if (panelOpen) finishHide();
+            removeStrip();
+            int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
+            if (id > 0) statusH = getResources().getDimensionPixelSize(id);
+            android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+            if (!locked() && (pm == null || pm.isInteractive())) addStrip();
+        }
+        // light/dark, font size, display size or language changed: rebuild the (hidden) panel
+        boolean restyle = panel != null && (panel.isDark != Ui.dark || was == null
+                || was.fontScale != c.fontScale || was.densityDpi != c.densityDpi || !was.getLocales().equals(c.getLocales()));
+        if (!restyle) return;
+        if (panelOpen) finishHide();
         try { wm.removeView(panel); } catch (Exception ignored) {}
-        panel.unbind();
+        panel.destroy();
         panel = null;
         ensurePanel();
+    }
+
+    /** An incoming call: get out of the way of the call screen. */
+    static void closeForCall() {
+        PanelService s = running;
+        if (s != null && s.panelOpen && s.panel != null) s.panel.close();
     }
 
     @Override public int statusBarHeight() { return statusH; }

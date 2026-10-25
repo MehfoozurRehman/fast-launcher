@@ -243,7 +243,7 @@ final class ControlPanel extends FrameLayout {
         notifScroll.addView(npage);
         notifScroll.setVisibility(GONE);
         pager.addView(notifScroll, new LayoutParams(-1, -2));
-        NotifService.panelListener = this::onNotifsChanged;
+        NotifService.panelListener = panelListener;
 
         // ---- the Bluetooth page
         btScroll = new ScrollView(c);
@@ -381,7 +381,11 @@ final class ControlPanel extends FrameLayout {
         LinearLayout.LayoutParams vl = new LinearLayout.LayoutParams(0, -1, 1f);
         vl.leftMargin = Ui.dpi(c, 8);
         mediaRow.addView(volume, vl);
-        brightness.listener = (v, d) -> safe(() -> setBrightness(v, d));
+        brightness.listener = (v, d) -> safe(() -> {
+            setBrightness(v, d);
+            brightness.setLabel(null); // dragging means an exact level: auto is off
+        });
+        brightness.onLongPress = () -> safe(this::toggleAutoBrightness);
         volume.listener = (v, d) -> safe(() -> setVolume(v, d));
         body.addView(mediaRow, Ui.lp(-1, Ui.dpi(c, 168), Ui.dpi(c, 10)));
 
@@ -427,7 +431,7 @@ final class ControlPanel extends FrameLayout {
             boolean was = Recorder.recording;
             closeThen(was ? 0 : 300, () -> Recorder.toggle(getContext()));
         });
-        Recorder.onChange = () -> record.setActive(Recorder.recording);
+        Recorder.onChange = recorderListener;
         cast.setOnClickListener(v -> open(new Intent(Settings.ACTION_CAST_SETTINGS)));
         calc.setOnClickListener(v -> openApp("com.google.android.calculator", "com.hihonor.calculator"));
         recorder.setOnClickListener(v -> openApp("com.hihonor.soundrecorder", "com.google.android.apps.recorder"));
@@ -508,6 +512,7 @@ final class ControlPanel extends FrameLayout {
     /** Re-read every control's state; called the moment a finger lands on the pull strip. */
     void refresh(boolean notifications) {
         final Context c = getContext();
+        notifsDirty = true; // "5m ago" and friends are rebuilt fresh on every open
         scroll.scrollTo(0, 0);
         showPage(notifications ? NOTIFS : CONTROLS);
         showNotifCount();
@@ -537,7 +542,10 @@ final class ControlPanel extends FrameLayout {
             data.set(on, on ? "On" : "Off");
         });
         torch.set(torchOn, torchOn ? "On" : "Off");
-        safe(() -> brightness.setValue(Settings.System.getInt(c.getContentResolver(), Settings.System.SCREEN_BRIGHTNESS, 128) / 255f));
+        safe(() -> {
+            brightness.setValue(Settings.System.getInt(c.getContentResolver(), Settings.System.SCREEN_BRIGHTNESS, 128) / 255f);
+            brightness.setLabel(autoBrightness() ? "Auto" : null);
+        });
         safe(() -> {
             AudioManager am = (AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
             volume.setValue(am.getStreamVolume(AudioManager.STREAM_MUSIC) / (float) Math.max(1, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)));
@@ -624,14 +632,33 @@ final class ControlPanel extends FrameLayout {
                     break;
                 }
             }
-            cameras.registerTorchCallback(new CameraManager.TorchCallback() {
-                @Override public void onTorchModeChanged(String id, boolean on) {
-                    if (!id.equals(torchId)) return;
-                    torchOn = on;
-                    torch.set(on, on ? "On" : "Off");
-                }
-            }, main);
+            cameras.registerTorchCallback(torchCallback, main);
         } catch (Exception ignored) {}
+    }
+
+    private final CameraManager.TorchCallback torchCallback = new CameraManager.TorchCallback() {
+        @Override public void onTorchModeChanged(String id, boolean on) {
+            if (!id.equals(torchId)) return;
+            torchOn = on;
+            torch.set(on, on ? "On" : "Off");
+        }
+    };
+
+    /**
+     * The panel is being thrown away (rebuilt for a new theme or font size, or the service is
+     * stopping): let go of everything registered with the system, so no old copy stays alive.
+     */
+    void destroy() {
+        unbind();
+        try { cameras.unregisterTorchCallback(torchCallback); } catch (Exception ignored) {}
+        android.bluetooth.BluetoothAdapter a = btAdapter();
+        for (java.util.Map.Entry<Integer, android.bluetooth.BluetoothProfile> e : btProfiles.entrySet()) {
+            try { if (a != null) a.closeProfileProxy(e.getKey(), e.getValue()); } catch (Exception ignored) {}
+        }
+        btProfiles.clear();
+        if (NotifService.panelListener == panelListener) NotifService.panelListener = null;
+        if (Recorder.onChange == recorderListener) Recorder.onChange = null;
+        main.removeCallbacksAndMessages(null);
     }
 
     private void toggleTorch() {
@@ -689,6 +716,24 @@ final class ControlPanel extends FrameLayout {
         lastBrightnessWrite = now;
         Settings.System.putInt(c.getContentResolver(), Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL);
         Settings.System.putInt(c.getContentResolver(), Settings.System.SCREEN_BRIGHTNESS, Math.max(1, Math.round(v * 255)));
+    }
+
+    private boolean autoBrightness() {
+        return Settings.System.getInt(getContext().getContentResolver(), Settings.System.SCREEN_BRIGHTNESS_MODE,
+                Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL) == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC;
+    }
+
+    /** Long-press the brightness slider: auto-brightness on/off (dragging sets an exact level). */
+    private void toggleAutoBrightness() {
+        Context c = getContext();
+        if (!Settings.System.canWrite(c)) {
+            open(new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + c.getPackageName())));
+            return;
+        }
+        boolean on = !autoBrightness();
+        Settings.System.putInt(c.getContentResolver(), Settings.System.SCREEN_BRIGHTNESS_MODE,
+                on ? Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC : Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL);
+        brightness.setLabel(on ? "Auto" : null);
     }
 
     private void setVolume(float v, boolean done) {
@@ -834,6 +879,7 @@ final class ControlPanel extends FrameLayout {
     }
 
     void unbind() {
+        replying = false;
         backdrop.setImageDrawable(null); // never show one app's blur over the next
         backdropBase.setVisibility(VISIBLE);
         main.removeCallbacks(tickProgress);
@@ -843,8 +889,22 @@ final class ControlPanel extends FrameLayout {
 
     // ================================================================ bluetooth
 
+    private final Runnable panelListener = this::onNotifsChanged;
+    private final Runnable recorderListener = this::onRecorderChanged;
+
+    private void onRecorderChanged() { record.setActive(Recorder.recording); }
     private final java.util.Set<String> btConnected = new java.util.HashSet<>();
+    private final java.util.Map<Integer, android.bluetooth.BluetoothProfile> btProfiles = new java.util.HashMap<>();
     private boolean btProxies;
+
+    /** Who's connected right now, asked fresh of each audio profile (devices come and go). */
+    private void readBtConnected() {
+        btConnected.clear();
+        for (android.bluetooth.BluetoothProfile p : btProfiles.values()) {
+            try { for (android.bluetooth.BluetoothDevice d : p.getConnectedDevices()) btConnected.add(d.getAddress()); }
+            catch (Exception ignored) {}
+        }
+    }
 
     private android.bluetooth.BluetoothAdapter btAdapter() {
         android.bluetooth.BluetoothManager bm = (android.bluetooth.BluetoothManager) getContext().getSystemService(Context.BLUETOOTH_SERVICE);
@@ -872,12 +932,10 @@ final class ControlPanel extends FrameLayout {
         btProxies = true;
         android.bluetooth.BluetoothProfile.ServiceListener l = new android.bluetooth.BluetoothProfile.ServiceListener() {
             @Override public void onServiceConnected(int profile, android.bluetooth.BluetoothProfile proxy) {
-                try {
-                    for (android.bluetooth.BluetoothDevice d : proxy.getConnectedDevices()) btConnected.add(d.getAddress());
-                } catch (Exception ignored) {}
+                btProfiles.put(profile, proxy);
                 if (page == BT) buildBt();
             }
-            @Override public void onServiceDisconnected(int profile) {}
+            @Override public void onServiceDisconnected(int profile) { btProfiles.remove(profile); }
         };
         int[] profiles = {android.bluetooth.BluetoothProfile.A2DP, android.bluetooth.BluetoothProfile.HEADSET,
                 android.bluetooth.BluetoothProfile.HEARING_AID, 22 /* LE_AUDIO */};
@@ -900,6 +958,7 @@ final class ControlPanel extends FrameLayout {
             return;
         }
         watchBtProfiles();
+        readBtConnected();
         java.util.Collections.sort(devices, (x, y) -> {
             boolean cx = btConnected.contains(x.getAddress()), cy = btConnected.contains(y.getAddress());
             if (cx != cy) return cx ? -1 : 1;
@@ -978,10 +1037,13 @@ final class ControlPanel extends FrameLayout {
     private final java.util.Map<String, CharSequence> appNames = new java.util.HashMap<>();
     private final java.util.Map<String, android.graphics.drawable.Drawable> appIcons = new java.util.HashMap<>();
 
+    /** True while a reply is being typed: the list waits, so the text isn't wiped by a refresh. */
+    private boolean replying;
+
     private void onNotifsChanged() {
         notifsDirty = true;
         showNotifCount();
-        if (page == NOTIFS) buildNotifs();
+        if (page == NOTIFS && !replying) buildNotifs();
     }
 
     private void showNotifCount() {
@@ -1136,10 +1198,116 @@ final class ControlPanel extends FrameLayout {
             b.setEllipsize(android.text.TextUtils.TruncateAt.END);
             col.addView(b, Ui.lp(-1, -2, Ui.dpi(c, 2)));
         }
+        // a download or upload: its progress, as the system shade would show it
+        if (x != null && (x.getInt(android.app.Notification.EXTRA_PROGRESS_MAX, 0) > 0
+                || x.getBoolean(android.app.Notification.EXTRA_PROGRESS_INDETERMINATE, false))) {
+            android.widget.ProgressBar pb = new android.widget.ProgressBar(c, null, android.R.attr.progressBarStyleHorizontal);
+            int max = x.getInt(android.app.Notification.EXTRA_PROGRESS_MAX, 0);
+            pb.setIndeterminate(max <= 0);
+            if (max > 0) { pb.setMax(max); pb.setProgress(x.getInt(android.app.Notification.EXTRA_PROGRESS, 0)); }
+            pb.setProgressTintList(android.content.res.ColorStateList.valueOf(Ui.ACCENT));
+            col.addView(pb, Ui.lp(-1, Ui.dpi(c, 6), Ui.dpi(c, 8)));
+        }
+        View actions = actionsRow(c, s, col);
+        if (actions != null) col.addView(actions, Ui.lp(-1, -2, Ui.dpi(c, 8)));
         row.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
         // ongoing ones (USB mode, charging, a download) stay put, like in the system shade
         row.dismissable = (n.flags & (android.app.Notification.FLAG_NO_CLEAR | android.app.Notification.FLAG_ONGOING_EVENT)) == 0;
         return row;
+    }
+
+    /**
+     * The notification's own buttons (Reply, Mark as read, Call back...), like the system shade.
+     * A button that takes text (Reply) opens a reply field right in the card.
+     */
+    private View actionsRow(final Context c, final android.service.notification.StatusBarNotification s, final LinearLayout col) {
+        android.app.Notification.Action[] all = s.getNotification().actions;
+        if (all == null || all.length == 0) return null;
+        final LinearLayout bar = new LinearLayout(c);
+        int shown = 0;
+        for (final android.app.Notification.Action a : all) {
+            if (a == null || a.title == null || a.actionIntent == null || shown == 3) continue;
+            TextView b = Ui.text(c, a.title.toString(), 13, Ui.ACCENT, true);
+            b.setTypeface(Ui.font(c, 600));
+            b.setSingleLine(true);
+            b.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            b.setGravity(Gravity.CENTER);
+            b.setPadding(Ui.dpi(c, 14), 0, Ui.dpi(c, 14), 0);
+            b.setBackground(Ui.round(ROUND, Ui.dp(c, 16)));
+            b.setClickable(true);
+            Ui.pressable(b);
+            final android.app.RemoteInput[] inputs = a.getRemoteInputs();
+            b.setOnClickListener(v -> {
+                if (inputs != null && inputs.length > 0) { replyField(c, s, a, inputs, col, bar); return; }
+                if (!send(a.actionIntent)) { openApp(s.getPackageName()); return; }
+                // buttons that just do something (mark read, mute...) leave the panel open;
+                // anything that may open a screen closes it so the screen isn't hidden
+                int sem = a.getSemanticAction();
+                if (sem != android.app.Notification.Action.SEMANTIC_ACTION_MARK_AS_READ
+                        && sem != android.app.Notification.Action.SEMANTIC_ACTION_MUTE
+                        && sem != android.app.Notification.Action.SEMANTIC_ACTION_DELETE
+                        && sem != android.app.Notification.Action.SEMANTIC_ACTION_ARCHIVE
+                        && sem != android.app.Notification.Action.SEMANTIC_ACTION_MARK_AS_UNREAD) close();
+            });
+            LinearLayout.LayoutParams lp = Ui.lp(-2, Ui.dpi(c, 32));
+            if (shown > 0) lp.leftMargin = Ui.dpi(c, 8);
+            bar.addView(b, lp);
+            shown++;
+        }
+        return shown == 0 ? null : bar;
+    }
+
+    /** Type a reply without leaving the panel; Send hands the text to the app, like the system shade. */
+    private void replyField(Context c, final android.service.notification.StatusBarNotification s, final android.app.Notification.Action a,
+                            final android.app.RemoteInput[] inputs, LinearLayout col, View bar) {
+        bar.setVisibility(GONE);
+        replying = true;
+        final LinearLayout box = new LinearLayout(c);
+        box.setGravity(Gravity.CENTER_VERTICAL);
+        box.setBackground(Ui.round(ROUND, Ui.dp(c, 20)));
+        final android.widget.EditText field = new android.widget.EditText(c);
+        field.setHint(inputs[0].getLabel() != null ? inputs[0].getLabel() : "Reply");
+        field.setTextColor(Ui.FG);
+        field.setHintTextColor(Ui.FG2);
+        field.setTextSize(14);
+        field.setBackground(null);
+        field.setPadding(Ui.dpi(c, 14), Ui.dpi(c, 8), Ui.dpi(c, 8), Ui.dpi(c, 8));
+        field.setMaxLines(4);
+        box.addView(field, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView sendBtn = Ui.text(c, "Send", 13.5f, Color.WHITE, true);
+        sendBtn.setTypeface(Ui.font(c, 600));
+        sendBtn.setGravity(Gravity.CENTER);
+        sendBtn.setPadding(Ui.dpi(c, 16), 0, Ui.dpi(c, 16), 0);
+        sendBtn.setBackground(Ui.round(Ui.ACCENT, Ui.dp(c, 16)));
+        sendBtn.setClickable(true);
+        Ui.pressable(sendBtn);
+        LinearLayout.LayoutParams sp = Ui.lp(-2, Ui.dpi(c, 32));
+        sp.rightMargin = Ui.dpi(c, 4);
+        box.addView(sendBtn, sp);
+        col.addView(box, Ui.lp(-1, -2, Ui.dpi(c, 8)));
+        final android.view.inputmethod.InputMethodManager imm =
+                (android.view.inputmethod.InputMethodManager) c.getSystemService(Context.INPUT_METHOD_SERVICE);
+        field.requestFocus();
+        field.post(() -> imm.showSoftInput(field, 0));
+        sendBtn.setOnClickListener(v -> {
+            CharSequence txt = field.getText();
+            if (txt == null || txt.toString().trim().isEmpty()) return;
+            Intent fill = new Intent();
+            android.os.Bundle results = new android.os.Bundle();
+            for (android.app.RemoteInput ri : inputs) results.putCharSequence(ri.getResultKey(), txt);
+            android.app.RemoteInput.addResultsToIntent(inputs, fill, results);
+            try {
+                a.actionIntent.send(getContext(), 0, fill);
+                field.setText("");
+                field.setHint("Sent");
+            } catch (Exception e) {
+                Diag.log("reply: " + e);
+                field.setHint("Couldn't send");
+            }
+            imm.hideSoftInputFromWindow(field.getWindowToken(), 0);
+            replying = false;
+            if (notifsDirty) postDelayed(this::buildNotifs, 900); // let "Sent" show, then catch up
+        });
     }
 
     private void openNotif(android.service.notification.StatusBarNotification s) {
@@ -1762,6 +1930,21 @@ final class ControlPanel extends FrameLayout {
         interface Change { void onChange(float value, boolean done); }
 
         Change listener;
+        Runnable onLongPress;
+        private String label; // shown instead of the percentage (e.g. "Auto")
+        private final Runnable longPress = () -> {
+            if (onLongPress == null) return;
+            longPressed = true;
+            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            onLongPress.run();
+        };
+        private boolean longPressed;
+
+        void setLabel(String l) {
+            if (java.util.Objects.equals(l, label)) return;
+            label = l;
+            invalidate();
+        }
         private float value;
         private float downY, startValue;
         private boolean moving;
@@ -1812,7 +1995,7 @@ final class ControlPanel extends FrameLayout {
             c.restoreToCount(save);
             float base = Ui.dp(getContext(), 26);
             pct.setColor(top < base - pct.getTextSize() * 0.5f ? Ui.ON_STRONG : Ui.FG2);
-            c.drawText(Math.round(value * 100) + "%", w / 2f, base, pct);
+            c.drawText(label != null ? label : Math.round(value * 100) + "%", w / 2f, base, pct);
         }
 
         @Override public boolean onTouchEvent(MotionEvent e) {
@@ -1821,21 +2004,30 @@ final class ControlPanel extends FrameLayout {
                     downY = e.getY();
                     startValue = value;
                     moving = false;
+                    longPressed = false;
+                    postDelayed(longPress, ViewConfiguration.getLongPressTimeout());
                     getParent().requestDisallowInterceptTouchEvent(true); // vertical drags belong to the slider
                     return true;
                 case MotionEvent.ACTION_MOVE:
-                    if (!moving && Math.abs(e.getY() - downY) > ViewConfiguration.get(getContext()).getScaledTouchSlop()) moving = true;
+                    if (longPressed) return true;
+                    if (!moving && Math.abs(e.getY() - downY) > ViewConfiguration.get(getContext()).getScaledTouchSlop()) {
+                        moving = true;
+                        removeCallbacks(longPress);
+                    }
                     if (moving) {
                         setValue(startValue - (e.getY() - downY) / Math.max(1, getHeight()));
                         if (listener != null) listener.onChange(value, false);
                     }
                     return true;
                 case MotionEvent.ACTION_UP:
+                    removeCallbacks(longPress);
+                    if (longPressed) return true; // the long-press did its thing (auto on/off)
                     if (!moving) setValue(1f - e.getY() / Math.max(1, getHeight())); // tap jumps to that level
                     if (listener != null) listener.onChange(value, true);
                     performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
                     return true;
                 case MotionEvent.ACTION_CANCEL:
+                    removeCallbacks(longPress);
                     return true;
             }
             return true;

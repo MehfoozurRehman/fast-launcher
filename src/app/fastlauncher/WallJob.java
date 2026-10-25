@@ -11,7 +11,7 @@ public class WallJob extends JobService {
         if (!Walls.due(this) || Walls.isBusy()) return false;
         new Thread(() -> {
             boolean retry = false;
-            try { Walls.next(getApplicationContext(), false); }
+            try { if (Walls.due(getApplicationContext())) Walls.next(getApplicationContext(), false); }
             catch (Exception e) { retry = true; }
             jobFinished(params, retry);
         }, "wall-job").start();

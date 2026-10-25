@@ -28,12 +28,34 @@ public class NotifService extends NotificationListenerService {
     static Changed listener;
     static Runnable panelListener;
     static NotifService running;
+    static final String TEST_CHANNEL = "fl_test";
 
     private final Handler main = new Handler(Looper.getMainLooper());
 
     @Override public void onListenerConnected() { Diag.install(this); running = this; refresh(); }
-    @Override public void onListenerDisconnected() { if (running == this) running = null; }
-    @Override public void onNotificationPosted(StatusBarNotification sbn) { refresh(); }
+    @Override public void onNotificationPosted(StatusBarNotification sbn) {
+        Notification n = sbn.getNotification();
+        // a ringing call (full-screen alarm or call screen): the panel must not cover it
+        if (n.fullScreenIntent != null || Notification.CATEGORY_CALL.equals(n.category) && (n.flags & Notification.FLAG_ONGOING_EVENT) == 0
+                || Notification.CATEGORY_ALARM.equals(n.category) && n.fullScreenIntent != null) {
+            main.post(PanelService::closeForCall);
+        }
+        refresh();
+    }
+
+    // Honor may unbind listeners under memory pressure; ask to be bound again rather than
+    // leaving badges and the notifications page silently empty
+    @Override public void onListenerDisconnected() {
+        if (running == this) running = null;
+        // nothing we show may outlive the connection: no stale badges, no undismissable rows
+        main.post(() -> {
+            counts = new HashMap<>();
+            list = new ArrayList<>();
+            if (listener != null) listener.onNotifCountsChanged();
+            if (panelListener != null) panelListener.run();
+        });
+        try { requestRebind(new android.content.ComponentName(this, NotifService.class)); } catch (Exception ignored) {}
+    }
     @Override public void onNotificationRemoved(StatusBarNotification sbn) { refresh(); }
 
     static void dismiss(String key) {
@@ -71,7 +93,8 @@ public class NotifService extends NotificationListenerService {
                     }
                     if (summary && groupsWithChildren.contains(s.getGroupKey())) continue;
                     if (n.extras != null && n.extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) continue;
-                    if (getPackageName().equals(s.getPackageName())) continue;
+                    // our own (the screen-recording one) stay out, except the adb test notification
+                    if (getPackageName().equals(s.getPackageName()) && !TEST_CHANNEL.equals(s.getNotification().getChannelId())) continue;
                     shown.add(s);
                 }
                 // ongoing ones first (like the system shade), then newest first

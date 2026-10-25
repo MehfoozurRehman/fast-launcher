@@ -102,13 +102,20 @@ final class WallpaperUi {
         void close() {
             if (closing) return;
             closing = true;
-            animateOut(() -> {
+            // the end of the closing animation finishes the job; if anything cancels that animation
+            // the timed fallback still does, so the launcher can never be left ignoring touches
+            final boolean[] done = {false};
+            final Runnable finish = () -> {
+                if (done[0]) return;
+                done[0] = true;
                 shown = false;
                 if (reusable) setVisibility(INVISIBLE);
-                else host.overlayParent().removeView(this);
+                else if (getParent() != null) host.overlayParent().removeView(this);
                 host.overlayClosed(this);
                 onClosed();
-            });
+            };
+            postDelayed(finish, 700);
+            animateOut(finish);
         }
 
         void onClosed() {}
@@ -334,6 +341,7 @@ final class WallpaperUi {
         @Override void animateIn() {
             card.setVisibility(INVISIBLE);
             post(() -> {
+                if (closing) return; // closed before the first frame: don't start the opening
                 card.setTranslationY(card.getHeight() + Ui.dp(getContext(), 40));
                 card.setVisibility(VISIBLE);
                 card.setLayerType(LAYER_TYPE_HARDWARE, null);
@@ -359,6 +367,7 @@ final class WallpaperUi {
 
         // drag the card down to dismiss
         @Override public boolean onInterceptTouchEvent(MotionEvent e) {
+            if (closing) return true; // on its way out: swallow, don't restart animations
             if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 dragStartY = e.getRawY(); dragging = false;
                 if (vt != null) vt.recycle();
@@ -376,6 +385,7 @@ final class WallpaperUi {
         }
 
         @Override public boolean onTouchEvent(MotionEvent e) {
+            if (closing) return true;
             if (!dragging) return super.onTouchEvent(e);
             if (vt != null) vt.addMovement(e);
             switch (e.getActionMasked()) {
