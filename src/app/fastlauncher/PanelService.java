@@ -106,6 +106,10 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
         lp.gravity = Gravity.TOP | Gravity.END;
         lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         lp.setTitle("FastLauncherPanelStrip");
+        // nothing to show: a nearly invisible window keeps the compositor on its fast path (at
+        // full alpha this layer over the status bar pushed the screen to GPU composition); alpha
+        // must stay above 0, or the window stops receiving touches
+        lp.alpha = 0.01f;
         try { wm.addView(strip, lp); } catch (Exception e) { strip = null; }
     }
 
@@ -115,12 +119,81 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
         strip = null;
     }
 
+    // ================================================================ blurred backdrop
+
+    private static final java.util.concurrent.ExecutorService blurWorker = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private long lastCapture;
+
+    /**
+     * Like the system's control centre: capture what's on screen right now (the panel is still
+     * invisible), shrink it to a tenth and blur it on a worker thread, then hand it to the panel
+     * as its background. The capture never leaves memory.
+     */
+    private void captureBehind() {
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now - lastCapture < 350) return; // Android allows about three captures a second
+        lastCapture = now;
+        try {
+            takeScreenshot(android.view.Display.DEFAULT_DISPLAY, blurWorker, new TakeScreenshotCallback() {
+                @Override public void onSuccess(ScreenshotResult r) {
+                    android.graphics.Bitmap blurred = null;
+                    try (android.hardware.HardwareBuffer buf = r.getHardwareBuffer()) {
+                        android.graphics.Bitmap hw = android.graphics.Bitmap.wrapHardwareBuffer(buf, r.getColorSpace());
+                        if (hw != null) {
+                            android.graphics.Bitmap soft = hw.copy(android.graphics.Bitmap.Config.ARGB_8888, false);
+                            hw.recycle();
+                            if (soft != null) {
+                                android.graphics.Bitmap small = android.graphics.Bitmap.createScaledBitmap(soft,
+                                        Math.max(1, soft.getWidth() / 10), Math.max(1, soft.getHeight() / 10), true);
+                                soft.recycle();
+                                if (!small.isMutable()) small = small.copy(android.graphics.Bitmap.Config.ARGB_8888, true);
+                                Walls.boxBlur(small, 4);
+                                Walls.boxBlur(small, 4);
+                                Walls.boxBlur(small, 4);
+                                tint(small, Ui.dark);
+                                blurred = Icons.toHardware(small);
+                            }
+                        }
+                    } catch (Exception e) {
+                        android.util.Log.w("FastLauncher", "panel blur: " + e);
+                    }
+                    final android.graphics.Bitmap b = blurred;
+                    if (b != null) main.post(() -> { if (panel != null) panel.setBackdrop(b); });
+                }
+                @Override public void onFailure(int code) {
+                    android.util.Log.w("FastLauncher", "panel capture failed: " + code);
+                }
+            });
+        } catch (Exception e) {
+            android.util.Log.w("FastLauncher", "panel capture: " + e);
+        }
+    }
+
+    /**
+     * Bakes the panel's tint into the blur (dimmed in dark mode, milky in light mode), so the
+     * background is one full-screen draw per frame instead of a picture plus a tint layer.
+     */
+    private static void tint(android.graphics.Bitmap b, boolean dark) {
+        int w = b.getWidth(), h = b.getHeight();
+        int[] px = new int[w * h];
+        b.getPixels(px, 0, w, 0, 0, w, h);
+        for (int i = 0; i < px.length; i++) {
+            int p = px[i], r = (p >> 16) & 255, g = (p >> 8) & 255, bl = p & 255;
+            if (dark) { r = r * 6 / 10; g = g * 6 / 10; bl = bl * 6 / 10; }
+            else { r = (r * 35 + 0xF2 * 65) / 100; g = (g * 35 + 0xF3 * 65) / 100; bl = (bl * 35 + 0xF5 * 65) / 100; }
+            px[i] = 0xFF000000 | (r << 16) | (g << 8) | bl;
+        }
+        b.setPixels(px, 0, w, 0, 0, w, h);
+    }
+
+    private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+
     /** Opens the notifications page from the launcher (swipe down on home). */
     static boolean openNotifications() {
         PanelService s = running;
         if (s == null) return false;
         s.ensurePanel();
-        if (!s.panelOpen) s.panel.refresh(true);
+        if (!s.panelOpen) { s.captureBehind(); s.panel.refresh(true); }
         s.showPanel();
         s.panel.animateTo(1f, 0f);
         return true;
@@ -148,7 +221,10 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
                     // read every control's state now, while the finger hasn't moved yet: this
                     // frame draws nothing visible, so the panel's first visible frame is cheap
                     ensurePanel();
-                    if (!panelOpen) panel.refresh(e.getRawX() < getWidth() * 0.45f);
+                    if (!panelOpen) {
+                        captureBehind();
+                        panel.refresh(e.getRawX() < getWidth() * 0.45f);
+                    }
                     return true;
                 case MotionEvent.ACTION_MOVE: {
                     float dy = e.getRawY() - downY;

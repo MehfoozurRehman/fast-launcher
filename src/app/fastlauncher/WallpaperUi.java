@@ -133,14 +133,14 @@ final class WallpaperUi {
             Context c = getContext();
             slop = ViewConfiguration.get(c).getScaledTouchSlop();
             backdrop = new View(c);
-            backdrop.setBackgroundColor(Ui.SCRIM);
+            backdrop.setBackgroundColor(Ui.dark ? 0x59000000 : 0x40000000);
             backdrop.setAlpha(0f);
             backdrop.setOnClickListener(v -> close());
             addView(backdrop, new FrameLayout.LayoutParams(-1, -1));
 
             card = new LinearLayout(c);
             card.setOrientation(LinearLayout.VERTICAL);
-            card.setBackground(Ui.round(Ui.CARD, Ui.dp(c, 30)));
+            card.setBackground(Ui.frost(card, Ui.dp(c, 30)));
             int p = Ui.dpi(c, 20);
             card.setPadding(p, Ui.dpi(c, 10), p, p);
             card.setClickable(true);

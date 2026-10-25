@@ -486,7 +486,7 @@ final class Walls {
     }
 
     /** Separable box blur in place; three passes approximate a gaussian. */
-    private static void boxBlur(Bitmap b, int r) {
+    static void boxBlur(Bitmap b, int r) {
         int w = b.getWidth(), h = b.getHeight();
         int[] px = new int[w * h], tmp = new int[w * h];
         b.getPixels(px, 0, w, 0, 0, w, h);

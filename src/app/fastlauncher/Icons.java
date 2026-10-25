@@ -25,7 +25,8 @@ import java.security.MessageDigest;
 import java.util.Set;
 
 /**
- * Renders every app icon as a pebble: a white organic blob plate with the app's own artwork
+ * Renders every app icon as a pebble: an organic blob plate (white in light mode, near-black
+ * in dark mode) with the app's own artwork
  * set into a smaller, slightly turned blob inside it. Each app gets its own gentle variation
  * of the shape, seeded from its name, so the grid feels hand-made but stays calm.
  * Shadows and all are baked into the bitmap, so drawing an icon is a single drawBitmap.
@@ -79,8 +80,8 @@ final class Icons {
 
     /** Disk-cached icon. Returns a GPU (HARDWARE) bitmap when possible. */
     static Bitmap load(Context c, PackageManager pm, ActivityInfo ai, int size, Set<String> used) {
-        File f = cacheFile(c, ai, size);
-        if (used != null) used.add(f.getName());
+        File f = cacheFile(c, ai, size, Ui.dark);
+        if (used != null) markUsed(c, ai, size, used);
         if (f.exists()) {
             Bitmap b = readRaw(f);
             if (b != null) return toHardware(b);
@@ -93,7 +94,9 @@ final class Icons {
 
     /** Records that an in-memory icon's cache file is still wanted, without decoding it. */
     static void markUsed(Context c, ActivityInfo ai, int size, Set<String> used) {
-        used.add(cacheFile(c, ai, size).getName());
+        // keep both looks on disk, so switching light/dark reuses them instead of re-rendering
+        used.add(cacheFile(c, ai, size, true).getName());
+        used.add(cacheFile(c, ai, size, false).getName());
     }
 
     static void prune(Context c, Set<String> used) {
@@ -108,10 +111,10 @@ final class Icons {
         return d;
     }
 
-    private static File cacheFile(Context c, ActivityInfo ai, int size) {
+    private static File cacheFile(Context c, ActivityInfo ai, int size, boolean dark) {
         long stamp = 0;
         try { stamp = new File(ai.applicationInfo.sourceDir).lastModified(); } catch (Exception ignored) {}
-        String key = ai.packageName + "/" + ai.name + "|" + stamp + "|" + size + "|v" + VERSION;
+        String key = ai.packageName + "/" + ai.name + "|" + stamp + "|" + size + "|v" + VERSION + (dark ? "|dark" : "");
         return new File(dir(c), md5(key) + ".px");
     }
 
@@ -212,30 +215,33 @@ final class Icons {
         Bitmap out = Bitmap.createBitmap(full, full, Bitmap.Config.ARGB_8888);
         Canvas cv = new Canvas(out);
 
-        // the white plate, with a soft drop shadow
+        // the plate, with a soft drop shadow: white in light mode, near-black in dark mode
+        boolean dark = Ui.dark;
+        int top = dark ? 0xFF2B2C2F : 0xFFFFFFFF, bottom = dark ? 0xFF16171A : 0xFFEDEFF3;
         Path plate = blob(cx, cy, plateR - density * 0.5f, seed, 0f);
         Paint shadow = new Paint(Paint.ANTI_ALIAS_FLAG);
-        shadow.setColor(Color.WHITE);
-        shadow.setShadowLayer(2.8f * density, 0, 1.3f * density, 0x3D000000);
+        shadow.setColor(top);
+        shadow.setShadowLayer(2.8f * density, 0, 1.3f * density, dark ? 0x66000000 : 0x3D000000);
         cv.drawPath(plate, shadow);
         Paint plateFill = new Paint(Paint.ANTI_ALIAS_FLAG);
-        plateFill.setShader(new LinearGradient(0, cy - plateR, 0, cy + plateR,
-                0xFFFFFFFF, 0xFFEDEFF3, Shader.TileMode.CLAMP));
+        plateFill.setShader(new LinearGradient(0, cy - plateR, 0, cy + plateR, top, bottom, Shader.TileMode.CLAMP));
         cv.drawPath(plate, plateFill);
-        // a hair of shade along the plate's lower edge, so it reads as a raised pebble
+        // a hair of shade along the lower edge (light) or of light along the top (dark), so it
+        // reads as a raised pebble either way
         Paint edge = new Paint(Paint.ANTI_ALIAS_FLAG);
         edge.setStyle(Paint.Style.STROKE);
         edge.setStrokeWidth(0.9f * density);
         edge.setShader(new LinearGradient(0, cy - plateR, 0, cy + plateR,
-                new int[]{0x00000000, 0x00000000, 0x1C000000}, new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
+                dark ? new int[]{0x2EFFFFFF, 0x00FFFFFF, 0x00FFFFFF} : new int[]{0x00000000, 0x00000000, 0x1C000000},
+                new float[]{0f, 0.45f, 1f}, Shader.TileMode.CLAMP));
         cv.drawPath(plate, edge);
 
         // the artwork, set into an echo of the plate's shape, a little turned, so the white
         // rim stays even all the way round while still feeling hand-placed
         Path art = blob(cx, cy, innerR, seed, 0.22f);
         Paint lift = new Paint(Paint.ANTI_ALIAS_FLAG);
-        lift.setColor(Color.WHITE);
-        lift.setShadowLayer(1.8f * density, 0, 0.9f * density, 0x33000000);
+        lift.setColor(top);
+        lift.setShadowLayer(1.8f * density, 0, 0.9f * density, dark ? 0x59000000 : 0x33000000);
         cv.drawPath(art, lift);
         Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
         BitmapShader bs = new BitmapShader(content, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);

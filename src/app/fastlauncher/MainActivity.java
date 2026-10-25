@@ -87,6 +87,8 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
     /** Survives activity recreation (theme/wallpaper changes), so icons never blink. */
     private static final List<AppGridView.AppEntry> CACHE = new ArrayList<>();
+    /** Which look (dark/light plates) the icons in CACHE were drawn with. */
+    private static boolean cacheDark = Ui.dark;
     private final List<AppGridView.AppEntry> all = new ArrayList<>();
     private List<AppGridView.AppEntry> drawerApps = new ArrayList<>();
     private List<AppGridView.AppEntry> shown = drawerApps;
@@ -411,7 +413,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             agendaHasEvent = hasEvent;
             if (!android.text.TextUtils.equals(agenda.getText(), text)) agenda.setText(text);
             int vis = text.isEmpty() ? View.GONE : View.VISIBLE;
-            if (agenda.getVisibility() != vis) agenda.setVisibility(vis);
+            if (agenda.getVisibility() != vis) Ui.fadeVisible(agenda, vis == View.VISIBLE);
         });
     }
 
@@ -655,6 +657,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             main.post(() -> {
                 if (isDestroyed()) return;
                 blurView.setBitmap(b == null ? null : b.bitmap);
+                Ui.frostSource = b == null ? null : b.bitmap; // frosted glass for menus and sheets
                 topLuma = b == null ? -1f : b.topLuma;
                 updateDrawerScrim();
                 updateTopScrim();
@@ -713,9 +716,13 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             Collections.sort(order, (a, b) -> Boolean.compare(!inDefaultDock(b), !inDefaultDock(a)));
             Set<String> used = new HashSet<>();
             int n = 0;
+            // light/dark switched: swap each icon for the other look as it's ready (the old one
+            // stays on screen meanwhile, so nothing blinks)
+            final boolean restyle = cacheDark != Ui.dark;
+            cacheDark = Ui.dark;
             for (AppGridView.AppEntry e : order) {
                 if (gen != loadGen) return;
-                if (e.icon == null) e.icon = Icons.load(this, pm, e.ai, iconPx, used);
+                if (e.icon == null || restyle) e.icon = Icons.load(this, pm, e.ai, iconPx, used);
                 else Icons.markUsed(this, e.ai, iconPx, used);
                 if (++n % 8 == 0) { grid.postInvalidate(); dock.postInvalidate(); }
             }
@@ -930,8 +937,8 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         List<AppGridView.AppEntry> l = new ArrayList<>();
         for (AppGridView.AppEntry e : all) if (!hidden.contains(e.cn.flattenToString())) l.add(e);
         drawerApps = l;
-        int n = all.size() - l.size();
-        grid.setFooter(n == 0 ? null : n + (n == 1 ? " hidden app" : " hidden apps"));
+        // no pill in the drawer: hidden apps show up in search, and "hidden" lists them all
+        grid.setFooter(null);
         if (searching) filter(search.getText().toString());
         else { shown = drawerApps; grid.setItems(drawerApps); }
     }
@@ -942,10 +949,16 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         prefs.edit().putStringSet("hidden", s).apply();
         refreshDrawerList();
         updateHeader();
-        snack(hide ? e.label + " hidden. Find it at the bottom of the drawer." : e.label + " is back in the drawer");
+        snack(hide ? e.label + " hidden. Search \u201Chidden\u201D to see hidden apps." : e.label + " is back in the drawer");
     }
 
     private void hiddenMenu(float cx, float cy) {
+        int[] loc = new int[2];
+        grid.getLocationInWindow(loc);
+        hiddenMenuAt(loc[0] + cx, loc[1] + cy);
+    }
+
+    private void hiddenMenuAt(float x, float y) {
         Set<String> hidden = hiddenSet();
         List<Popup.Item> items = new ArrayList<>();
         for (final AppGridView.AppEntry e : all) {
@@ -955,9 +968,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             items.add(new Popup.Item(e.label, icon, () -> setHidden(e, false)));
         }
         if (items.isEmpty()) return;
-        int[] loc = new int[2];
-        grid.getLocationInWindow(loc);
-        new Popup(this, "Hidden apps", null, new ArrayList<>(), items, null, loc[0] + cx, loc[1] + cy, 0).open();
+        new Popup(this, "Hidden apps", null, new ArrayList<>(), items, null, x, y, 0).open();
     }
 
     private void appInfo(AppGridView.AppEntry e) {
@@ -1058,6 +1069,12 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             @Override public void start(Intent i, View from) { startSafely(i, from); }
             @Override public void snack(String msg) { MainActivity.this.snack(msg); }
             @Override public void onExtrasHeight(int px) { setGridTop(px == 0 ? 0 : px + dpi(12)); }
+            @Override public int hiddenCount() { return hiddenSet().size(); }
+            @Override public void openHidden(View from) {
+                int[] loc = new int[2];
+                from.getLocationInWindow(loc);
+                hiddenMenuAt(loc[0] + from.getWidth() / 2f, loc[1] + from.getHeight());
+            }
         });
         drawer.addView(extras, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
         placeSearch();
@@ -1080,8 +1097,18 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         FrameLayout.LayoutParams gp = (FrameLayout.LayoutParams) grid.getLayoutParams();
         int top = insetTop + dpi(92) + extra;
         if (gp.topMargin == top) return;
+        // the apps glide down to make room for the search extras (and back up): the layout
+        // moves at once, the grid's translation carries it smoothly from where it was
+        float from = gp.topMargin - top + grid.getTranslationY();
         gp.topMargin = top;
         grid.setLayoutParams(gp);
+        grid.animate().cancel();
+        if (searching && drawer.getVisibility() == View.VISIBLE) {
+            grid.setTranslationY(from);
+            grid.animate().translationY(0f).setDuration(200).setInterpolator(Ui.EMPHASIZED).start();
+        } else {
+            grid.setTranslationY(0f);
+        }
     }
 
     private void beginSearch() {
@@ -1117,7 +1144,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         if (q.isEmpty()) { shown = drawerApps; grid.setItems(drawerApps); return; }
         // prefix matches (on any word) first, then anything containing the text
         List<AppGridView.AppEntry> starts = new ArrayList<>(), contains = new ArrayList<>();
-        for (AppGridView.AppEntry e : drawerApps) {
+        for (AppGridView.AppEntry e : all) {
             if (e.lower.startsWith(q) || e.lower.contains(" " + q)) starts.add(e);
             else if (e.lower.contains(q)) contains.add(e);
             // "whatsapp" should still find "WA Business" (com.whatsapp.w4b)
@@ -1137,7 +1164,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private void snack(String msg, long ms) {
         if (snackView == null) {
             snackView = Ui.text(this, "", 14, Ui.FG, true);
-            snackView.setBackground(Ui.round(Ui.CARD, dpi(22)));
+            snackView.setBackground(Ui.frost(snackView, dpi(22)));
             snackView.setPadding(dpi(18), dpi(13), dpi(18), dpi(13));
             snackView.setGravity(Gravity.CENTER);
         }
@@ -1249,11 +1276,8 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 @Override public boolean hasOverlappingRendering() { return false; }
             };
             card.setOrientation(LinearLayout.VERTICAL);
-            card.setBackground(Ui.round(Ui.CARD, Ui.dp(c, 28)));
             card.setPadding(0, Ui.dpi(c, 6), 0, Ui.dpi(c, 10));
-            android.graphics.drawable.GradientDrawable cardBg = Ui.round(Ui.CARD, Ui.dp(c, 28));
-            cardBg.setStroke(Math.max(1, Ui.dpi(c, 1)), Ui.LINE);
-            card.setBackground(cardBg);
+            card.setBackground(Ui.frost(card, Ui.dp(c, 28)));
             card.setClipToOutline(true);
 
             // header: icon + name + round buttons
@@ -1397,7 +1421,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         };
 
         Root(Context c) { super(c); }
-
 
         private float travel() { return Math.max(1, getHeight()); }
 

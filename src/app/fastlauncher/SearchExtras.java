@@ -37,68 +37,125 @@ final class SearchExtras extends LinearLayout {
         void start(Intent i, View from);
         void snack(String msg);
         void onExtrasHeight(int px);
+        int hiddenCount();
+        void openHidden(View from);
     }
 
     private static final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Host host;
     private int gen;
-    private String query = "";
+    private String query = "", maths;
+    private String shownContacts = "";
+
+    // Built once and reused while typing: a keystroke only changes text and visibility, and the
+    // contact rows are rebuilt only when the set of matching contacts actually changes.
+    private final View mathsRow, webRow, hiddenRow;
+    private final TextView mathsTitle, webTitle, hiddenTitle;
+    private boolean hiddenShown;
+    private final LinearLayout contactBox;
 
     SearchExtras(Context c, Host h) {
         super(c);
         host = h;
         setOrientation(VERTICAL);
+        mathsRow = row(c, panelIcon(c, PanelIcons.CALC), "", "Tap to copy", v -> { if (maths != null) copy(maths); });
+        mathsTitle = (TextView) mathsRow.getTag();
+        hiddenRow = row(c, glyph(c, Ui.G_SEARCH), "Hidden apps", "Tap to see them", v -> host.openHidden(v));
+        hiddenTitle = (TextView) hiddenRow.getTag();
+        contactBox = new LinearLayout(c);
+        contactBox.setOrientation(VERTICAL);
+        webRow = row(c, glyph(c, Ui.G_SEARCH), "", null, this::web);
+        webTitle = (TextView) webRow.getTag();
+        addView(hiddenRow, rowLp());
+        addView(mathsRow, rowLp());
+        addView(contactBox, new LinearLayout.LayoutParams(-1, -2));
+        addView(webRow, rowLp());
+        setVisibility(GONE);
+        // rows fade in and out and the others slide to make room; LayoutTransition copes with
+        // changes arriving faster than the animation (typing), unlike a scene transition
+        setLayoutTransition(Ui.rows());
+        contactBox.setLayoutTransition(Ui.rows());
+    }
+
+    private LinearLayout.LayoutParams rowLp() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, Ui.dpi(getContext(), 52));
+        lp.bottomMargin = Ui.dpi(getContext(), 6);
+        return lp;
     }
 
     void update(String raw) {
         final String q = raw.trim();
         query = q;
         final int g = ++gen;
-        if (q.isEmpty()) { show(null, new ArrayList<>()); return; }
-        final String maths = Calc.answer(q);
-        // show the instant rows now; contacts join when the lookup returns
-        show(maths, new ArrayList<>());
-        if (q.length() < 2 || getContext().checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return;
+        if (q.isEmpty()) {
+            showContacts(new ArrayList<>());
+            setVisibility(GONE);
+            host.onExtrasHeight(0);
+            return;
+        }
+        maths = Calc.answer(q);
+        if (maths != null) mathsTitle.setText("= " + maths);
+        setVis(mathsRow, maths != null);
+        // the hidden apps live here, out of the drawer: type "hidden" (or the start of it)
+        int hidden = q.length() >= 3 && "hidden".startsWith(q.toLowerCase(Locale.ROOT)) ? host.hiddenCount() : 0;
+        hiddenShown = hidden > 0;
+        if (hiddenShown) hiddenTitle.setText(hidden == 1 ? "1 hidden app" : hidden + " hidden apps");
+        setVis(hiddenRow, hiddenShown);
+        webTitle.setText("Search the web for \u201C" + q + "\u201D");
+        setVis(this, true);
+        boolean lookup = q.length() >= 2
+                && getContext().checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED;
+        // the previous contacts stay up while the lookup runs (a few ms), so the grid doesn't jump twice
+        if (!lookup) showContacts(new ArrayList<>());
+        reportHeight();
+        if (!lookup) return;
         final Context app = getContext().getApplicationContext();
         worker.execute(() -> {
             if (g != gen) return;
             final List<Contact> found = contacts(app, q);
-            main.post(() -> { if (g == gen && !found.isEmpty()) show(maths, found); });
+            main.post(() -> {
+                if (g != gen) return;
+                showContacts(found);
+                reportHeight();
+            });
         });
+    }
+
+    private static void setVis(View v, boolean on) {
+        int vis = on ? VISIBLE : GONE;
+        if (v.getVisibility() != vis) v.setVisibility(vis);
+    }
+
+    private static String keyOf(List<Contact> found) {
+        StringBuilder key = new StringBuilder();
+        for (Contact k : found) key.append(k.id).append(',');
+        return key.toString();
+    }
+
+    private void showContacts(List<Contact> found) {
+        String key = keyOf(found);
+        if (key.equals(shownContacts)) return;
+        shownContacts = key;
+        contactBox.removeAllViews();
+        Context c = getContext();
+        for (final Contact k : found) {
+            contactBox.addView(row(c, avatar(c, k), k.name, k.number, v -> host.start(new Intent(Intent.ACTION_VIEW,
+                    ContentUris.withAppendedId(ContactsContract.Contacts.CONTENT_URI, k.id)), v)), rowLp());
+        }
+    }
+
+    /** Fixed-height rows, so the height is arithmetic: no measure pass while typing. */
+    private void reportHeight() {
+        int rows = 1 + (maths != null ? 1 : 0) + (hiddenShown ? 1 : 0) + contactBox.getChildCount();
+        host.onExtrasHeight(rows * Ui.dpi(getContext(), 52 + 6) - Ui.dpi(getContext(), 6));
     }
 
     /** Enter on the keyboard with no app match: the best extra (maths result copied, else the web). */
     void runDefault() {
         if (query.isEmpty()) return;
-        String maths = Calc.answer(query);
         if (maths != null) { copy(maths); return; }
         web(this);
-    }
-
-    private void show(String maths, List<Contact> found) {
-        removeAllViews();
-        Context c = getContext();
-        if (!query.isEmpty()) {
-            if (maths != null) {
-                final String m = maths;
-                addRow(row(c, panelIcon(c, PanelIcons.CALC), "= " + m, "Tap to copy", v -> copy(m)));
-            }
-            for (final Contact k : found) {
-                addRow(row(c, avatar(c, k), k.name, k.number, v -> host.start(new Intent(Intent.ACTION_VIEW,
-                        ContentUris.withAppendedId(ContactsContract.Contacts.CONTENT_URI, k.id)), v)));
-            }
-            addRow(row(c, glyph(c, Ui.G_SEARCH), "Search the web for “" + query + "”", null, this::web));
-        }
-        measure(MeasureSpec.makeMeasureSpec(Math.max(1, getWidth() > 0 ? getWidth() : getResources().getDisplayMetrics().widthPixels), MeasureSpec.AT_MOST),
-                MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
-        host.onExtrasHeight(getChildCount() == 0 ? 0 : getMeasuredHeight());
-    }
-
-    private void addRow(View v) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, Ui.dpi(getContext(), 52));
-        if (getChildCount() > 0) lp.topMargin = Ui.dpi(getContext(), 6);
-        addView(v, lp);
     }
 
     private void web(View v) {
@@ -154,6 +211,7 @@ final class SearchExtras extends LinearLayout {
         t.setSingleLine(true);
         t.setEllipsize(android.text.TextUtils.TruncateAt.END);
         col.addView(t);
+        r.setTag(t);
         if (sub != null && !sub.isEmpty()) {
             TextView st = Ui.text(c, sub, 12, 0xB3FFFFFF, false);
             st.setSingleLine(true);

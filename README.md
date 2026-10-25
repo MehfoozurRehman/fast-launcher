@@ -11,17 +11,19 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   Search finds apps, contacts and sums (`12*8+4`), with a web search below; Enter launches the top hit.
 - **Wallpaper swaps** cross-fade: the launcher shows the new image itself while Android rebinds its
   wallpaper window, hiding the black blink.
-- **Icons**: pebbles. Each app sits on a white organic blob plate, with its own artwork set into an
+- **Icons**: pebbles. Each app sits on an organic blob plate (white in light mode, near-black in dark mode), with its own artwork set into an
   echo of that shape. Every app gets a gentle variation seeded from its name. Shadows are baked in.
   Real adaptive icons are used even on Honor, whose icon theme normally swaps them for pre-shaped bitmaps
   (see `Icons.raw`: adaptive icons are inflated from their XML, bitmap icons decoded from raw PNG bytes).
 - **Long-press an app**: a card with the app's own shortcuts (round icons, e.g. recent WhatsApp chats),
   round Info / Hide / Uninstall buttons and Add to dock (tap the dashed slot you want). Hidden apps
-  collect behind a pill at the bottom of the drawer.
+  stay out of the drawer but still come up in search; type “hidden” to list them.
+  Single-colour shortcut icons (Facebook's, for example) are tinted so they show on the dark card.
 - **Swipe down on home** opens the notifications page; **double-tap** empty space to lock the phone.
 - **Under the date**: the next alarm and calendar event when they fall within the coming day.
 - **Notifications, from any app**: swipe down from the left side of the status bar. Tap one to open it,
-  swipe it sideways to dismiss, or Clear all. The bell in the panel's header switches between pages.
+  swipe it right to dismiss, or Clear all. Swipe sideways to move between notifications and controls;
+  a swipe from the screen edge (the back gesture) closes the panel.
 - **Control panel, from any app**: swipe down from the right half of the status bar (needs the
   "Fast Launcher controls" accessibility service, which reads no screen content). Wi-Fi, Mobile data,
   Bluetooth and Torch tiles; a now-playing card (album art, live progress you can drag to seek, controls; tap it to open the player) beside tall brightness and volume sliders that show the real level; and a
@@ -31,8 +33,9 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   Tap Bluetooth to see paired devices and which one is connected (or to get Android's turn-on prompt).
   Long-press any round button and drag it to rearrange the grid; the order is remembered.
   The pull strip is removed while the phone is locked.
-- **Light and dark mode**: the panel, menus and wallpaper sheet follow the system theme, using the
-  same colours as the system's own pop-ups.
+- **Look**: like the system's control centre, the panel shows whatever was on screen, blurred, behind
+  see-through tiles (the capture stays in memory and is never saved). Menus, the wallpaper sheet
+  and messages are frosted glass over the blurred wallpaper. Everything follows light and dark mode.
 - **Type**: clock, date and headings use Montserrat (bundled, SIL Open Font License, see `assets/fonts/OFL.txt`).
 - **Long-press home**: wallpaper panel, the launcher's only settings.
   - Wallpapers come from [wallhaven.cc](https://wallhaven.cc) (SFW, portrait, at least 1080x1920).

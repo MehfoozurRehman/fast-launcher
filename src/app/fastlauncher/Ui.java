@@ -48,15 +48,16 @@ final class Ui {
     private static void apply(boolean d) {
         dark = d;
         if (d) {
-            CARD = 0xFF2E2E2E; GROUP = 0xFF3A3A3A; FILL = 0xFF424242; ICON_BG = 0xFF4A4A4A;
+            // surfaces inside cards are see-through, so frosted cards stay glassy
+            CARD = 0xFF2E2E2E; GROUP = 0x1AFFFFFF; FILL = 0x24FFFFFF; ICON_BG = 0x2EFFFFFF;
             FG = 0xFFEAEAEA; FG2 = 0xFFA9A9A9; FG3 = 0xFF8C8C8C;
-            LINE = 0xFF424242; PRESS = 0x1FFFFFFF; HANDLE = 0x52FFFFFF; SCRIM = 0xB3000000; BG = 0xFF1F1F1F;
+            LINE = 0x1AFFFFFF; PRESS = 0x1FFFFFFF; HANDLE = 0x52FFFFFF; SCRIM = 0xB3000000; BG = 0xFF1F1F1F;
             TRACK = 0xFF4E4E4E; STRONG = 0xFFEAEAEA; ON_STRONG = 0xFF191919;
             ACCENT = 0xFF3D7FFF; DANGER = 0xFFFF6B60; DANGER_BG = 0x33FF453A;
         } else {
-            CARD = 0xFFFFFFFF; GROUP = 0xFFF1F2F4; FILL = 0xFFEBECEF; ICON_BG = 0xFFFFFFFF;
+            CARD = 0xFFFFFFFF; GROUP = 0x8CFFFFFF; FILL = 0xB3FFFFFF; ICON_BG = 0xE6FFFFFF;
             FG = 0xFF191919; FG2 = 0xFF5F6368; FG3 = 0xFF8A8F96;
-            LINE = 0xFFEDEDED; PRESS = 0x14000000; HANDLE = 0x33000000; SCRIM = 0x73000000; BG = 0xFFF5F6F8;
+            LINE = 0x14000000; PRESS = 0x14000000; HANDLE = 0x33000000; SCRIM = 0x73000000; BG = 0xFFF5F6F8;
             TRACK = 0xFFD5D8DD; STRONG = 0xFF256FFF; ON_STRONG = 0xFFFFFFFF;
             ACCENT = 0xFF256FFF; DANGER = 0xFFE5392F; DANGER_BG = 0x1FE5392F;
         }
@@ -107,6 +108,8 @@ final class Ui {
         } else {
             d.setBounds(0, 0, px, px);
             d.draw(new Canvas(src));
+            Bitmap glyph = glyphIcon(src, px);
+            if (glyph != null) return new android.graphics.drawable.BitmapDrawable(c.getResources(), glyph);
         }
         Bitmap out = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888);
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
@@ -115,8 +118,145 @@ final class Ui {
         return new android.graphics.drawable.BitmapDrawable(c.getResources(), out);
     }
 
+    /**
+     * Shortcut icons that are just a drawing on a see-through background (Facebook's are black
+     * line art meant to be tinted by the app's own theme) vanish on a dark card. Put them on a
+     * soft accent circle; a one-colour drawing is tinted the accent, a colourful one kept as is.
+     * Returns null for normal, filled icons.
+     */
+    private static Bitmap glyphIcon(Bitmap src, int px) {
+        int[] p = new int[px * px];
+        src.getPixels(p, 0, px, 0, 0, px, px);
+        float r = px / 2f, r2 = r * r * 0.81f; // judge the inner circle, where a filled icon is solid
+        int inside = 0, clear = 0, opaque = 0;
+        long sr = 0, sg = 0, sb = 0;
+        int minL = 255, maxL = 0, chroma = 0;
+        for (int y = 0; y < px; y++) for (int x = 0; x < px; x++) {
+            float dx = x + 0.5f - r, dy = y + 0.5f - r;
+            if (dx * dx + dy * dy > r2) continue;
+            inside++;
+            int c = p[y * px + x], a = c >>> 24;
+            if (a < 24) { clear++; continue; }
+            if (a < 160) continue;
+            opaque++;
+            int R = (c >> 16) & 255, G = (c >> 8) & 255, B = c & 255;
+            int l = (R * 3 + G * 6 + B) / 10;
+            minL = Math.min(minL, l); maxL = Math.max(maxL, l);
+            chroma = Math.max(chroma, Math.max(R, Math.max(G, B)) - Math.min(R, Math.min(G, B)));
+        }
+        if (inside == 0 || opaque == 0) return null;
+        boolean mono = maxL - minL < 60 && chroma < 60;
+        // a big near-black drawing (a solid bell, a filled square) is just as invisible on a
+        // dark card even though it covers most of the circle: catch it by its see-through corners
+        int clearAll = 0;
+        for (int c : p) if ((c >>> 24) < 24) clearAll++;
+        boolean darkGlyph = mono && maxL < 80 && clearAll > p.length * 0.12f;
+        if (clear < inside * 0.25f && !darkGlyph) return null;
+        Bitmap out = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888);
+        Canvas cv = new Canvas(out);
+        Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG);
+        bg.setColor(mono ? (ACCENT & 0x00FFFFFF) | (dark ? 0x33000000 : 0x24000000) : (dark ? 0xE6FFFFFF : 0xFFFFFFFF));
+        cv.drawCircle(r, r, r, bg);
+        Paint fg = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        if (mono) fg.setColorFilter(new android.graphics.PorterDuffColorFilter(dark ? 0xFF8AB4FF : ACCENT, android.graphics.PorterDuff.Mode.SRC_IN));
+        float inset = px * 0.2f; // the drawing sits inside the circle with some air around it
+        cv.drawBitmap(src, null, new RectF(inset, inset, px - inset, px - inset), fg);
+        return out;
+    }
+
     static float dp(Context c, float v) { return v * c.getResources().getDisplayMetrics().density; }
     static int dpi(Context c, float v) { return Math.round(dp(c, v)); }
+
+    /**
+     * One shared motion for content changes (rows appearing, lists closing up, things making
+     * room): fade and move together, on the launcher's emphasized curve.
+     */
+    static android.transition.Transition motion() {
+        android.transition.TransitionSet t = new android.transition.TransitionSet();
+        t.setOrdering(android.transition.TransitionSet.ORDERING_TOGETHER);
+        t.addTransition(new android.transition.Fade());
+        t.addTransition(new android.transition.ChangeBounds());
+        t.setDuration(220);
+        t.setInterpolator(EMPHASIZED);
+        return t;
+    }
+
+    /** Rows that fade in/out while their neighbours slide, for lists that change as you type. */
+    static android.animation.LayoutTransition rows() {
+        android.animation.LayoutTransition t = new android.animation.LayoutTransition();
+        t.enableTransitionType(android.animation.LayoutTransition.CHANGING);
+        t.setDuration(180);
+        t.setInterpolator(android.animation.LayoutTransition.CHANGE_APPEARING, EMPHASIZED);
+        t.setInterpolator(android.animation.LayoutTransition.CHANGE_DISAPPEARING, EMPHASIZED);
+        t.setInterpolator(android.animation.LayoutTransition.CHANGING, EMPHASIZED);
+        t.setStartDelay(android.animation.LayoutTransition.APPEARING, 0);
+        t.setStartDelay(android.animation.LayoutTransition.CHANGE_DISAPPEARING, 0);
+        t.setStartDelay(android.animation.LayoutTransition.CHANGE_APPEARING, 0);
+        return t;
+    }
+
+    /** Show or hide with a short fade instead of popping. */
+    static void fadeVisible(final View v, boolean show) {
+        if (show == (v.getVisibility() == View.VISIBLE) && v.getAlpha() == (show ? 1f : v.getAlpha())) return;
+        v.animate().cancel();
+        if (show) {
+            if (v.getVisibility() != View.VISIBLE) { v.setAlpha(0f); v.setVisibility(View.VISIBLE); }
+            v.animate().alpha(1f).setDuration(200).setInterpolator(STANDARD).start();
+        } else {
+            v.animate().alpha(0f).setDuration(160).setInterpolator(STANDARD).withEndAction(() -> v.setVisibility(View.GONE)).start();
+        }
+    }
+
+    /** The blurred wallpaper (same picture the drawer uses); null when the wallpaper isn't ours. */
+    static Bitmap frostSource;
+
+    /**
+     * Frosted glass for launcher cards: the blurred wallpaper that sits behind the card, lined
+     * up with the screen, under a light tint. Falls back to a plain card colour without a blur.
+     */
+    static android.graphics.drawable.Drawable frost(final View owner, final float radius) {
+        final int tint = dark ? 0x66000000 : 0xB8F5F6F8;
+        return new android.graphics.drawable.Drawable() {
+            private final Paint bmp = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
+            private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final android.graphics.Path clip = new android.graphics.Path();
+            private final Matrix m = new Matrix();
+            private final int[] loc = new int[2];
+
+            @Override public void draw(Canvas c) {
+                android.graphics.Rect b = getBounds();
+                clip.reset();
+                clip.addRoundRect(b.left, b.top, b.right, b.bottom, radius, radius, android.graphics.Path.Direction.CW);
+                Bitmap src = frostSource; // read at draw time: the blur may load after the card is built
+                if (src == null) {
+                    fill.setColor(CARD);
+                    c.drawPath(clip, fill);
+                    return;
+                }
+                int save = c.save();
+                c.clipPath(clip);
+                // map the screen-sized blur so the part under the card is what shows through
+                android.util.DisplayMetrics dm = owner.getResources().getDisplayMetrics();
+                owner.getLocationOnScreen(loc);
+                float sx = owner.getScaleX() == 0 ? 1 : owner.getScaleX(), sy = owner.getScaleY() == 0 ? 1 : owner.getScaleY();
+                float s = Math.max(dm.widthPixels / (float) src.getWidth(), dm.heightPixels / (float) src.getHeight());
+                m.setScale(s / sx, s / sy);
+                m.postTranslate(-loc[0] / sx, -loc[1] / sy);
+                c.drawBitmap(src, m, bmp);
+                fill.setColor(tint);
+                c.drawRect(b, fill);
+                c.restoreToCount(save);
+            }
+
+            @Override public void getOutline(android.graphics.Outline o) {
+                o.setRoundRect(getBounds(), radius);
+            }
+
+            @Override public void setAlpha(int a) { bmp.setAlpha(a); fill.setAlpha(a); }
+            @Override public void setColorFilter(android.graphics.ColorFilter cf) {}
+            @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
+        };
+    }
 
     static GradientDrawable round(int color, float radius) {
         GradientDrawable g = new GradientDrawable();

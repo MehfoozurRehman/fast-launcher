@@ -75,10 +75,23 @@ final class ControlPanel extends FrameLayout {
     static final int CONTROLS = 0, NOTIFS = 1, BT = 2;
     private int page = CONTROLS;
     private final ScrollView btScroll;
+    private final FrameLayout pager;
+    private final Dots dots;
+    private boolean paging, fromEdge;
+    private int pagingTo = -1;
+    private ValueAnimator pageAnim;
     private final LinearLayout btList;
     private final TextView btToggle;
     final boolean isDark = Ui.dark; // the palette this panel was built in
-    private final View scrim;
+    private final FrameLayout scrim;
+    private final ImageView backdrop;
+    private final View backdropBase;
+
+    /**
+     * See-through surfaces over the blurred screen, like the system's control centre: tiles are
+     * a shade darker (lighter in light mode) than the blur, round buttons a shade lighter.
+     */
+    static int TILE, ROUND;
     private final LinearLayout card;
     private final ScrollView scroll;
     private final TextView time, date;
@@ -114,8 +127,20 @@ final class ControlPanel extends FrameLayout {
         slop = ViewConfiguration.get(c).getScaledTouchSlop();
         cameras = (CameraManager) c.getSystemService(Context.CAMERA_SERVICE);
 
-        scrim = new View(c);
-        scrim.setBackgroundColor(Ui.SCRIM);
+        TILE = Ui.dark ? 0x4D000000 : 0x99FFFFFF;
+        ROUND = Ui.dark ? 0x26FFFFFF : 0x14000000;
+        // the background: whatever was on screen, blurred (falls back to a plain shade until the
+        // capture arrives), with a tint so text stays readable over any app
+        scrim = new FrameLayout(c) {
+            @Override public boolean hasOverlappingRendering() { return false; }
+        };
+        // the tint is baked into the blurred picture (see PanelService.tint): one full-screen draw
+        backdropBase = new View(c);
+        backdropBase.setBackgroundColor(Ui.dark ? 0xFF171717 : 0xFFEDEEF0);
+        scrim.addView(backdropBase, new LayoutParams(-1, -1));
+        backdrop = new ImageView(c);
+        backdrop.setScaleType(ImageView.ScaleType.FIT_XY);
+        scrim.addView(backdrop, new LayoutParams(-1, -1));
         scrim.setAlpha(0f);
         scrim.setOnClickListener(v -> close());
         addView(scrim, new LayoutParams(-1, -1));
@@ -125,9 +150,7 @@ final class ControlPanel extends FrameLayout {
             @Override public boolean hasOverlappingRendering() { return false; }
         };
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(Ui.round(Ui.CARD, Ui.dp(c, 30)));
         card.setPadding(0, Ui.dpi(c, 16), 0, Ui.dpi(c, 8));
-        card.setClipToOutline(true);
         card.setClickable(true);
         LayoutParams clp = new LayoutParams(-1, -2, Gravity.TOP);
         int m = Ui.dpi(c, 8);
@@ -152,7 +175,7 @@ final class ControlPanel extends FrameLayout {
         notifButton = new LinearLayout(c);
         notifButton.setGravity(Gravity.CENTER_VERTICAL);
         notifButton.setPadding(Ui.dpi(c, 11), 0, Ui.dpi(c, 14), 0);
-        notifButton.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 22)));
+        notifButton.setBackground(Ui.round(TILE, Ui.dp(c, 22)));
         notifBell = new PanelIcons(c, PanelIcons.BELL, Ui.FG);
         notifButton.addView(notifBell, Ui.lp(Ui.dpi(c, 22), Ui.dpi(c, 22)));
         notifCount = Ui.text(c, "", 14, Ui.FG, true);
@@ -165,7 +188,6 @@ final class ControlPanel extends FrameLayout {
         notifButton.setOnClickListener(v -> showPage(page == NOTIFS ? CONTROLS : NOTIFS));
         LinearLayout.LayoutParams nbp = Ui.lp(-2, Ui.dpi(c, 44));
         nbp.rightMargin = Ui.dpi(c, 8);
-        head.addView(notifButton, nbp);
         head.addView(circleButton(c, PanelIcons.GEAR, () -> open(new Intent(Settings.ACTION_SETTINGS))));
         card.addView(head, Ui.lp(-1, -2));
 
@@ -180,7 +202,10 @@ final class ControlPanel extends FrameLayout {
         // weight lets the list shrink (and scroll) when the card hits the screen's bottom margin
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-1, 0, 1f);
         slp.topMargin = Ui.dpi(c, 10);
-        card.addView(scroll, slp);
+        // the pages sit side by side: notifications | controls | (Bluetooth, from its tile)
+        pager = new FrameLayout(c);
+        card.addView(pager, slp);
+        pager.addView(scroll, new LayoutParams(-1, -2));
 
         // ---- the notifications page (swapped in for the controls)
         notifScroll = new ScrollView(c);
@@ -199,10 +224,10 @@ final class ControlPanel extends FrameLayout {
         clearAll.setTypeface(Ui.font(c, 600));
         clearAll.setGravity(Gravity.CENTER);
         clearAll.setPadding(Ui.dpi(c, 16), 0, Ui.dpi(c, 16), 0);
-        clearAll.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 18)));
+        clearAll.setBackground(Ui.round(TILE, Ui.dp(c, 18)));
         clearAll.setClickable(true);
         Ui.pressable(clearAll);
-        clearAll.setOnClickListener(v -> { NotifService.dismissAll(); showPage(CONTROLS); });
+        clearAll.setOnClickListener(v -> { NotifService.dismissAll(); slideTo(CONTROLS); });
         nhead.addView(clearAll, Ui.lp(-2, Ui.dpi(c, 36)));
         npage.addView(nhead, Ui.lp(-1, -2));
         notifList = new LinearLayout(c);
@@ -212,10 +237,8 @@ final class ControlPanel extends FrameLayout {
         notifEmpty.setGravity(Gravity.CENTER);
         npage.addView(notifEmpty, Ui.lp(-1, Ui.dpi(c, 120)));
         notifScroll.addView(npage);
-        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(-1, 0, 1f);
-        nlp.topMargin = Ui.dpi(c, 12);
         notifScroll.setVisibility(GONE);
-        card.addView(notifScroll, nlp);
+        pager.addView(notifScroll, new LayoutParams(-1, -2));
         NotifService.panelListener = this::onNotifsChanged;
 
         // ---- the Bluetooth page
@@ -230,10 +253,10 @@ final class ControlPanel extends FrameLayout {
         TextView back = Ui.text(c, "\u2039", 26, Ui.FG, false);
         back.setGravity(Gravity.CENTER);
         back.setPadding(0, 0, 0, Ui.dpi(c, 3));
-        back.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 18)));
+        back.setBackground(Ui.round(TILE, Ui.dp(c, 18)));
         back.setClickable(true);
         Ui.pressable(back);
-        back.setOnClickListener(v -> showPage(CONTROLS));
+        back.setOnClickListener(v -> slideTo(CONTROLS));
         bhead.addView(back, Ui.lp(Ui.dpi(c, 36), Ui.dpi(c, 36)));
         TextView btitle = Ui.text(c, "Bluetooth", 17, Ui.FG, true);
         btitle.setTypeface(Ui.font(c, 650));
@@ -256,10 +279,8 @@ final class ControlPanel extends FrameLayout {
                 new LinearLayout.LayoutParams(0, Ui.dpi(c, 44), 1f));
         bpage.addView(bfoot, Ui.lp(-1, -2, Ui.dpi(c, 12)));
         btScroll.addView(bpage);
-        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(-1, 0, 1f);
-        blp.topMargin = Ui.dpi(c, 12);
         btScroll.setVisibility(GONE);
-        card.addView(btScroll, blp);
+        pager.addView(btScroll, new LayoutParams(-1, -2));
 
         // ---- four tiles, each its own button
         wifi = new Item(c, PanelIcons.WIFI, "Wi-Fi");
@@ -271,7 +292,7 @@ final class ControlPanel extends FrameLayout {
         wifi.setOnClickListener(v -> open(new Intent(Settings.Panel.ACTION_WIFI)));
         wifi.setOnLongClickListener(v -> { open(new Intent(Settings.ACTION_WIFI_SETTINGS)); return true; });
         // on: show paired devices here; off: Android's one-tap "turn on" prompt. Long-press: settings
-        bluetooth.setOnClickListener(v -> { if (btOn()) showPage(BT); else requestBt(true); });
+        bluetooth.setOnClickListener(v -> { if (btOn()) slideTo(BT); else requestBt(true); });
         bluetooth.setOnLongClickListener(v -> { open(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); return true; });
         data.setOnClickListener(v -> open(new Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)));
         torch.setOnClickListener(v -> safe(this::toggleTorch));
@@ -282,7 +303,7 @@ final class ControlPanel extends FrameLayout {
         mediaRow.addView(media, new LinearLayout.LayoutParams(0, -1, 2f));
 
         mediaFull = new FrameLayout(c);
-        mediaFull.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 24)));
+        mediaFull.setBackground(Ui.round(TILE, Ui.dp(c, 24)));
         mediaFull.setClipToOutline(true);
         mediaArt = new ImageView(c);
         mediaArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -333,12 +354,12 @@ final class ControlPanel extends FrameLayout {
         mediaEmpty = new LinearLayout(c);
         mediaEmpty.setOrientation(LinearLayout.VERTICAL);
         mediaEmpty.setGravity(Gravity.CENTER);
-        mediaEmpty.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 24)));
+        mediaEmpty.setBackground(Ui.round(TILE, Ui.dp(c, 24)));
         mediaEmpty.setPadding(Ui.dpi(c, 14), 0, Ui.dpi(c, 14), 0);
         PanelIcons note = new PanelIcons(c, PanelIcons.PLAY, Ui.FG2);
         int np = Ui.dpi(c, 13);
         note.setPadding(np, np, np, np);
-        note.setBackground(Ui.round(Ui.ICON_BG, Ui.dp(c, 23)));
+        note.setBackground(Ui.round(ROUND, Ui.dp(c, 23)));
         mediaEmpty.addView(note, Ui.lp(Ui.dpi(c, 46), Ui.dpi(c, 46)));
         TextView e1 = Ui.text(c, "Nothing playing", 14, Ui.FG, true);
         e1.setTypeface(Ui.font(c, 600));
@@ -379,7 +400,7 @@ final class ControlPanel extends FrameLayout {
         power = new Round(c, PanelIcons.POWER, "Power");
         // long-press any of them and drag to rearrange; the order is remembered
         RoundGrid grid = new RoundGrid(c, Ui.dpi(c, 10));
-        grid.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 24)));
+        grid.setBackground(Ui.round(TILE, Ui.dp(c, 24)));
         grid.setPadding(Ui.dpi(c, 4), Ui.dpi(c, 14), Ui.dpi(c, 4), Ui.dpi(c, 12));
         final android.content.SharedPreferences prefs = c.getSharedPreferences("panel", Context.MODE_PRIVATE);
         grid.setRounds(java.util.Arrays.asList(hotspot, rotate, plane, location, dark, dnd, sound, eye,
@@ -409,9 +430,9 @@ final class ControlPanel extends FrameLayout {
         lock.setOnClickListener(v -> closeThen(250, () -> host.globalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)));
         power.setOnClickListener(v -> closeThen(200, () -> host.globalAction(AccessibilityService.GLOBAL_ACTION_POWER_DIALOG)));
 
-        View handle = new View(c);
-        handle.setBackground(Ui.round(Ui.HANDLE, Ui.dp(c, 2)));
-        LinearLayout.LayoutParams hp = Ui.lp(Ui.dpi(c, 36), Ui.dpi(c, 4), Ui.dpi(c, 10));
+        dots = new Dots(c);
+        View handle = dots;
+        LinearLayout.LayoutParams hp = Ui.lp(Ui.dpi(c, 60), Ui.dpi(c, 6), Ui.dpi(c, 12));
         hp.gravity = Gravity.CENTER_HORIZONTAL;
         card.addView(handle, hp);
 
@@ -439,7 +460,7 @@ final class ControlPanel extends FrameLayout {
 
     private PanelIcons circleButton(Context c, int type, Runnable action) {
         PanelIcons b = new PanelIcons(c, type, Ui.FG);
-        b.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 22)));
+        b.setBackground(Ui.round(TILE, Ui.dp(c, 22)));
         int p = Ui.dpi(c, 11);
         b.setPadding(p, p, p, p);
         b.setClickable(true);
@@ -465,6 +486,20 @@ final class ControlPanel extends FrameLayout {
     }
 
     // ================================================================ state
+
+    /** The blurred capture of the screen behind; fades in over the plain shade. */
+    void setBackdrop(Bitmap b) {
+        backdrop.setImageBitmap(b);
+        if (progress <= 0f) {
+            // not visible yet (the usual case): no fade needed, and the plain shade can go
+            backdrop.setAlpha(1f);
+            backdropBase.setVisibility(INVISIBLE);
+            return;
+        }
+        backdrop.setAlpha(0f);
+        backdrop.animate().alpha(1f).setDuration(140)
+                .withEndAction(() -> backdropBase.setVisibility(INVISIBLE)).start();
+    }
 
     /** Re-read every control's state; called the moment a finger lands on the pull strip. */
     void refresh(boolean notifications) {
@@ -693,8 +728,13 @@ final class ControlPanel extends FrameLayout {
 
     private void showMedia() {
         boolean real = controller != null && isReal(controller);
-        mediaFull.setVisibility(real ? VISIBLE : GONE);
-        mediaEmpty.setVisibility(real ? GONE : VISIBLE);
+        if (progress > 0f) {
+            Ui.fadeVisible(mediaFull, real);
+            Ui.fadeVisible(mediaEmpty, !real);
+        } else {
+            mediaFull.setVisibility(real ? VISIBLE : GONE);
+            mediaEmpty.setVisibility(real ? GONE : VISIBLE);
+        }
         main.removeCallbacks(tickProgress);
         if (!real) return;
         MediaMetadata m = controller.getMetadata();
@@ -790,6 +830,8 @@ final class ControlPanel extends FrameLayout {
     }
 
     void unbind() {
+        backdrop.setImageDrawable(null); // never show one app's blur over the next
+        backdropBase.setVisibility(VISIBLE);
         main.removeCallbacks(tickProgress);
         if (controller != null) controller.unregisterCallback(mediaCallback);
         controller = null;
@@ -843,7 +885,7 @@ final class ControlPanel extends FrameLayout {
         boolean on = btOn();
         btToggle.setText(on ? "On" : "Off");
         btToggle.setTextColor(on ? Color.WHITE : Ui.FG);
-        btToggle.setBackground(Ui.round(on ? Ui.ACCENT : Ui.GROUP, Ui.dp(c, 18)));
+        btToggle.setBackground(Ui.round(on ? Ui.ACCENT : TILE, Ui.dp(c, 18)));
         btList.removeAllViews();
         if (!on) { btList.addView(btMessage(c, "Bluetooth is off")); return; }
         java.util.List<android.bluetooth.BluetoothDevice> devices = new java.util.ArrayList<>();
@@ -864,13 +906,13 @@ final class ControlPanel extends FrameLayout {
             boolean connected = btConnected.contains(d.getAddress());
             LinearLayout r = new LinearLayout(c);
             r.setGravity(Gravity.CENTER_VERTICAL);
-            r.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 22)));
+            r.setBackground(Ui.round(TILE, Ui.dp(c, 22)));
             int p = Ui.dpi(c, 10);
             r.setPadding(p, p, Ui.dpi(c, 16), p);
             PanelIcons icon = new PanelIcons(c, btAudio(d) ? PanelIcons.SPEAKER : PanelIcons.BLUETOOTH, connected ? Color.WHITE : Ui.FG);
             int ip = Ui.dpi(c, 11);
             icon.setPadding(ip, ip, ip, ip);
-            icon.setBackground(Ui.round(connected ? Ui.ACCENT : Ui.ICON_BG, Ui.dp(c, 22)));
+            icon.setBackground(Ui.round(connected ? Ui.ACCENT : ROUND, Ui.dp(c, 22)));
             r.addView(icon, Ui.lp(Ui.dpi(c, 44), Ui.dpi(c, 44)));
             LinearLayout col = new LinearLayout(c);
             col.setOrientation(LinearLayout.VERTICAL);
@@ -920,7 +962,7 @@ final class ControlPanel extends FrameLayout {
         TextView t = Ui.text(c, label, 14, Ui.FG, true);
         t.setTypeface(Ui.font(c, 600));
         t.setGravity(Gravity.CENTER);
-        t.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 22)));
+        t.setBackground(Ui.round(TILE, Ui.dp(c, 22)));
         t.setClickable(true);
         Ui.pressable(t);
         t.setOnClickListener(v -> r.run());
@@ -950,22 +992,82 @@ final class ControlPanel extends FrameLayout {
     private void showPage(int p) {
         if (p == NOTIFS && notifsDirty) buildNotifs();
         if (p == BT) buildBt();
-        if (p == page) return;
+        if (pageAnim != null) pageAnim.cancel();
+        for (ScrollView v : new ScrollView[]{scroll, notifScroll, btScroll}) v.setTranslationX(0f);
+        if (p != page) {
+            notifScroll.scrollTo(0, 0);
+            btScroll.scrollTo(0, 0);
+        }
         page = p;
-        Context c = getContext();
-        notifScroll.scrollTo(0, 0);
-        btScroll.scrollTo(0, 0);
         scroll.setVisibility(p == CONTROLS ? VISIBLE : GONE);
         notifScroll.setVisibility(p == NOTIFS ? VISIBLE : GONE);
         btScroll.setVisibility(p == BT ? VISIBLE : GONE);
-        boolean n = p == NOTIFS;
-        notifButton.setBackground(Ui.round(n ? Ui.ACCENT : Ui.GROUP, Ui.dp(c, 22)));
-        notifBell.setColor(n ? Color.WHITE : Ui.FG);
-        notifCount.setTextColor(n ? Color.WHITE : Ui.FG);
+        dots.setPosition(p == NOTIFS ? 0f : 1f);
+    }
+
+    // ---------------------------------------------------------------- swiping between pages
+
+    private static int slot(int p) { return p == NOTIFS ? 0 : p == CONTROLS ? 1 : 2; }
+
+    private ScrollView pageView(int p) { return p == NOTIFS ? notifScroll : p == BT ? btScroll : scroll; }
+
+    /** Which page a sideways swipe leads to: notifications sit left of the controls. */
+    private static int neighbour(int from, float dx) {
+        if (from == CONTROLS) return dx > 0 ? NOTIFS : -1;
+        if (from == NOTIFS) return dx < 0 ? CONTROLS : -1;
+        return dx > 0 ? CONTROLS : -1; // Bluetooth: back to the controls
+    }
+
+    /** offset: how far the current page has moved; the neighbour rides alongside it. */
+    private void layPages(int from, int to, float offset) {
+        float w = Math.max(1, pager.getWidth());
+        pageView(from).setTranslationX(offset);
+        if (to >= 0) {
+            View v = pageView(to);
+            if (v.getVisibility() != VISIBLE) {
+                if (to == NOTIFS && notifsDirty) buildNotifs();
+                if (to == BT) buildBt();
+                v.setVisibility(VISIBLE);
+            }
+            v.setTranslationX(offset + (slot(to) - slot(from)) * w);
+            float f = Math.min(1f, Math.abs(offset) / w);
+            float a = from == NOTIFS ? 0f : 1f, b = to == NOTIFS ? 0f : 1f;
+            dots.setPosition(a + (b - a) * f);
+        }
+    }
+
+    private void slideTo(int target) {
+        if (target == page) return;
+        animatePages(page, target, 0f, true, 0f);
+    }
+
+    private void animatePages(final int from, final int to, float start, final boolean commit, float velocity) {
+        if (pageAnim != null) pageAnim.cancel();
+        float w = Math.max(1, pager.getWidth());
+        float end = commit && to >= 0 ? -(slot(to) - slot(from)) * w : 0f;
+        long dur = Math.round(170 + 110 * Math.abs(end - start) / w);
+        if (Math.abs(velocity) > 600) dur = Math.max(140, Math.min(dur, Math.round(Math.abs(end - start) / Math.abs(velocity) * 1000 * 1.6f)));
+        card.setLayerType(LAYER_TYPE_NONE, null); // two pages moving: drawing them directly is cheaper
+        pageAnim = ValueAnimator.ofFloat(start, end);
+        pageAnim.setDuration(dur);
+        pageAnim.setInterpolator(Ui.EMPHASIZED);
+        pageAnim.addUpdateListener(a -> layPages(from, to, (Float) a.getAnimatedValue()));
+        pageAnim.addListener(new AnimatorListenerAdapter() {
+            boolean cancelled;
+            @Override public void onAnimationCancel(Animator a) { cancelled = true; }
+            @Override public void onAnimationEnd(Animator a) {
+                card.setLayerType(LAYER_TYPE_HARDWARE, null);
+                if (cancelled) return;
+                pageAnim = null;
+                showPage(commit && to >= 0 ? to : from);
+            }
+        });
+        pageAnim.start();
     }
 
     private void buildNotifs() {
         notifsDirty = false;
+        if (page == NOTIFS && progress > 0f) android.transition.TransitionManager.beginDelayedTransition(notifList, Ui.motion());
         notifList.removeAllViews();
         List<android.service.notification.StatusBarNotification> all = NotifService.list;
         int shown = Math.min(all.size(), 40);
@@ -992,7 +1094,7 @@ final class ControlPanel extends FrameLayout {
             NotifService.dismiss(s.getKey());
         }, () -> openNotif(s));
         row.setGravity(Gravity.TOP);
-        row.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 22)));
+        row.setBackground(Ui.round(TILE, Ui.dp(c, 22)));
         int p = Ui.dpi(c, 14);
         row.setPadding(p, p, p, p);
 
@@ -1002,7 +1104,7 @@ final class ControlPanel extends FrameLayout {
         android.graphics.drawable.Drawable d = null;
         try { if (n.getLargeIcon() != null) d = n.getLargeIcon().loadDrawable(c); } catch (Exception ignored) {}
         if (d != null) {
-            icon.setBackground(Ui.round(Ui.ICON_BG, Ui.dp(c, 20)));
+            icon.setBackground(Ui.round(ROUND, Ui.dp(c, 20)));
             icon.setClipToOutline(true);
         } else {
             d = appIcon(pkg);
@@ -1102,6 +1204,7 @@ final class ControlPanel extends FrameLayout {
 
     /** A notification card: tap to open, swipe sideways to dismiss. */
     static final class NotifRow extends LinearLayout {
+        static boolean touching; // read by the panel: a right swipe here belongs to the card
         boolean dismissable = true;
         private final Runnable onDismiss, onOpen;
         private float downX, downY;
@@ -1124,10 +1227,11 @@ final class ControlPanel extends FrameLayout {
                 case MotionEvent.ACTION_DOWN:
                     downX = e.getRawX(); downY = e.getRawY();
                     swiping = false; cancelled = false;
+                    touching = true;
                     animate().scaleX(0.98f).scaleY(0.98f).setDuration(90).start();
                     return true;
                 case MotionEvent.ACTION_MOVE:
-                    if (!swiping && !cancelled && dismissable && Math.abs(dx) > slop && Math.abs(dx) > Math.abs(dy)) {
+                    if (!swiping && !cancelled && dismissable && dx > slop && Math.abs(dx) > Math.abs(dy)) {
                         swiping = true;
                         getParent().requestDisallowInterceptTouchEvent(true);
                     }
@@ -1139,6 +1243,7 @@ final class ControlPanel extends FrameLayout {
                     return true;
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
+                    touching = false;
                     animate().scaleX(1f).scaleY(1f).setDuration(140).start();
                     vt.computeCurrentVelocity(1000);
                     float vx = vt.getXVelocity();
@@ -1150,7 +1255,10 @@ final class ControlPanel extends FrameLayout {
                             float to = Math.signum(dx == 0 ? vx : dx) * getWidth();
                             animate().translationX(to).alpha(0f).setDuration(160).withEndAction(() -> {
                                 ViewGroup p = (ViewGroup) getParent();
-                                if (p != null) p.removeView(this);
+                                if (p != null) {
+                                    android.transition.TransitionManager.beginDelayedTransition(p, Ui.motion());
+                                    p.removeView(this);
+                                }
                                 onDismiss.run();
                             }).start();
                         } else {
@@ -1233,6 +1341,8 @@ final class ControlPanel extends FrameLayout {
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 downX = e.getRawX(); downY = e.getRawY(); dragging = false;
+                float edge = Ui.dp(getContext(), 24);
+                fromEdge = downX < edge || downX > getWidth() - edge;
                 if (vt != null) vt.recycle();
                 vt = VelocityTracker.obtain();
                 vt.addMovement(e);
@@ -1247,12 +1357,52 @@ final class ControlPanel extends FrameLayout {
                     if (anim != null) anim.cancel();
                     return true;
                 }
+                // from the screen edge it's the back gesture (the system doesn't always send Back
+                // over the home screen): close, whichever page is showing
+                if (fromEdge && Math.abs(dx) > slop && Math.abs(dx) > Math.abs(dy)) {
+                    fromEdge = false;
+                    close();
+                    return true;
+                }
+                // sideways: switch pages (a right swipe on a notification card dismisses it instead)
+                if (Math.abs(dx) > slop && Math.abs(dx) > Math.abs(dy) * 1.5f
+                        && !(NotifRow.touching && dx > 0) && (pageAnim == null || !pageAnim.isRunning())) {
+                    paging = true;
+                    pagingTo = -1;
+                    downX = e.getRawX() - Math.signum(dx) * slop; // no jump of the slop distance
+                    card.setLayerType(LAYER_TYPE_NONE, null);
+                    return true;
+                }
                 break;
         }
         return false;
     }
 
     @Override public boolean onTouchEvent(MotionEvent e) {
+        if (paging) {
+            if (vt != null) vt.addMovement(e);
+            float dx = e.getRawX() - downX;
+            int to = neighbour(page, dx);
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_MOVE:
+                    if (pagingTo >= 0 && pagingTo != to) pageView(pagingTo).setVisibility(GONE);
+                    pagingTo = to;
+                    layPages(page, to, to < 0 ? dx * 0.2f : dx); // no page that way: just give a little
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL: {
+                    paging = false;
+                    float vx = 0;
+                    if (vt != null) { vt.computeCurrentVelocity(1000); vx = vt.getXVelocity(); vt.recycle(); vt = null; }
+                    float w = Math.max(1, pager.getWidth());
+                    boolean commit = to >= 0 && e.getActionMasked() == MotionEvent.ACTION_UP
+                            && (Math.abs(dx) > w * 0.3f || (Math.abs(vx) > 800 && Math.signum(vx) == Math.signum(dx)));
+                    animatePages(page, to, to < 0 ? dx * 0.2f : dx, commit, vx);
+                    return true;
+                }
+            }
+            return true;
+        }
         if (!dragging) return super.onTouchEvent(e);
         if (vt != null) vt.addMovement(e);
         switch (e.getActionMasked()) {
@@ -1272,6 +1422,34 @@ final class ControlPanel extends FrameLayout {
     }
 
     // ================================================================ widgets
+
+    /** Two dots under the pages (notifications, controls); the active one stretches into a pill. */
+    static final class Dots extends View {
+        private float pos = 1f;
+        private final Paint on = new Paint(Paint.ANTI_ALIAS_FLAG), off = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        Dots(Context c) {
+            super(c);
+            on.setColor(Ui.dark ? 0xE6FFFFFF : 0xCC000000);
+            off.setColor(Ui.dark ? 0x59FFFFFF : 0x40000000);
+        }
+
+        void setPosition(float p) {
+            if (Math.abs(p - pos) < 0.001f) return;
+            pos = p;
+            invalidate();
+        }
+
+        @Override protected void onDraw(Canvas c) {
+            float h = getHeight(), r = h / 2f, gap = h * 1.6f, pill = h * 3.2f;
+            float w0 = h + (pill - h) * (1f - pos), w1 = h + (pill - h) * pos;
+            float x = (getWidth() - (w0 + gap + w1)) / 2f;
+            on.setAlpha(Math.round(255 * (Ui.dark ? 0.9f : 0.8f)));
+            c.drawRoundRect(x, 0, x + w0, h, r, r, pos < 0.5f ? on : off);
+            x += w0 + gap;
+            c.drawRoundRect(x, 0, x + w1, h, r, r, pos >= 0.5f ? on : off);
+        }
+    }
 
     /** A standalone tile: icon in a circle, a name and a state; fully lit when on. */
     static final class Item extends LinearLayout {
@@ -1310,8 +1488,8 @@ final class ControlPanel extends FrameLayout {
             if (shown != null && shown == on) { setIfChanged(state, s); return; }
             shown = on;
             Context c = getContext();
-            setBackground(Ui.round(on ? Ui.ACCENT : Ui.GROUP, Ui.dp(c, 22)));
-            icon.setBackground(Ui.round(on ? 0x33FFFFFF : Ui.ICON_BG, Ui.dp(c, 22)));
+            setBackground(Ui.round(on ? Ui.ACCENT : TILE, Ui.dp(c, 22)));
+            icon.setBackground(Ui.round(on ? 0x33FFFFFF : ROUND, Ui.dp(c, 22)));
             icon.setColor(on ? Color.WHITE : Ui.FG);
             title.setTextColor(on ? Color.WHITE : Ui.FG);
             state.setText(s);
@@ -1349,7 +1527,7 @@ final class ControlPanel extends FrameLayout {
         void setActive(boolean on) {
             if (shown != null && shown == on) return;
             shown = on;
-            icon.setBackground(Ui.round(on ? Ui.ACCENT : Ui.ICON_BG, Ui.dp(getContext(), 27)));
+            icon.setBackground(Ui.round(on ? Ui.ACCENT : ROUND, Ui.dp(getContext(), 27)));
             icon.setColor(on ? Color.WHITE : Ui.FG);
             label.setTextColor(on ? Ui.FG : Ui.FG2);
         }
@@ -1455,7 +1633,15 @@ final class ControlPanel extends FrameLayout {
             place();
         }
 
+        private final java.util.Map<Round, float[]> before = new java.util.HashMap<>();
+
         private void place() {
+            before.clear();
+            for (Round r : order) {
+                if (r == dragged || r.getParent() == null) continue;
+                LinearLayout row = (LinearLayout) r.getParent();
+                before.put(r, new float[]{row.getLeft() + r.getLeft() + r.getTranslationX(), row.getTop() + r.getTop() + r.getTranslationY()});
+            }
             for (LinearLayout row : rows) row.removeAllViews();
             for (int i = 0; i < order.size(); i++) {
                 rows[Math.min(rows.length - 1, i / 4)].addView(order.get(i), new LinearLayout.LayoutParams(0, -2, 1f));
@@ -1493,6 +1679,20 @@ final class ControlPanel extends FrameLayout {
         @Override protected void onLayout(boolean changed, int l, int t, int r, int b) {
             super.onLayout(changed, l, t, r, b);
             follow();
+            if (before.isEmpty()) return;
+            // each moved button starts where it was and glides into its new slot
+            for (java.util.Map.Entry<Round, float[]> e : before.entrySet()) {
+                Round x = e.getKey();
+                LinearLayout row = (LinearLayout) x.getParent();
+                if (row == null) continue;
+                float dx = e.getValue()[0] - (row.getLeft() + x.getLeft()), dy = e.getValue()[1] - (row.getTop() + x.getTop());
+                if (dx == 0 && dy == 0) continue;
+                x.animate().cancel();
+                x.setTranslationX(dx);
+                x.setTranslationY(dy);
+                x.animate().translationX(0f).translationY(0f).setDuration(200).setInterpolator(Ui.EMPHASIZED).start();
+            }
+            before.clear();
         }
 
         @Override protected int getChildDrawingOrder(int count, int i) {
@@ -1570,7 +1770,7 @@ final class ControlPanel extends FrameLayout {
         VSlider(Context c, int type) {
             super(c);
             setWillNotDraw(false);
-            track.setColor(Ui.GROUP);
+            track.setColor(TILE);
             fill.setColor(Ui.STRONG);
             pct.setTextAlign(Paint.Align.CENTER);
             pct.setTypeface(Ui.font(c, 600));

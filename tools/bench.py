@@ -166,6 +166,8 @@ def restore_home():
 def cold_start():
     """Kill the launcher; Android relaunches home by itself and logs how long the first frame took."""
     times = []
+    # Android switches off a force-stopped app's accessibility service: put the panel's back after
+    a11y = sh("settings get secure enabled_accessibility_services").strip()
     for _ in range(2):  # Honor resets the default home after repeated force-stops
         adb("logcat", "-c")
         sh(f"am force-stop {PKG}")
@@ -174,6 +176,9 @@ def cold_start():
         m = re.search(r"Displayed " + re.escape(PKG) + r"/\.MainActivity[^+]*\+(?:(\d+)s)?(\d+)ms", log)
         if m:
             times.append(int(m.group(1) or 0) * 1000 + int(m.group(2)))
+    if a11y and a11y != "null":
+        sh(f"settings put secure enabled_accessibility_services {a11y}")
+        sh("settings put secure accessibility_enabled 1")
     restore_home()
     print(f"{'cold_start':14s} first frame after a kill: {times} ms (median {statistics.median(times) if times else '-'})")
 
