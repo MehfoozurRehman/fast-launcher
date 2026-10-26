@@ -355,8 +355,7 @@ final class ControlPanel extends FrameLayout {
         mediaArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
         mediaFull.addView(mediaArt, new LayoutParams(-1, -1));
         View shade = new View(c);
-        shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0xC7000000, 0x80000000, 0xD9000000}));
+        shade.setBackgroundColor(0x9E000000); // flat dim so the white text reads over any art
         mediaFull.addView(shade, new LayoutParams(-1, -1));
         LinearLayout mcol = new LinearLayout(c);
         mcol.setOrientation(LinearLayout.VERTICAL);

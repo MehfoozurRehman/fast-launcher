@@ -130,7 +130,13 @@ final class WallpaperUi {
         private final LinearLayout card;
         private final Ui.RoundImage now;
         private final TextView nowTitle, nowSub, nextText;
-        private final Ui.Pill shuffle, browse;
+        private final Ui.Glyph shuffle;
+        private final View shuffleBtn, browse;
+        private final LinearLayout picks;
+        private final List<Walls.Wall> pickWalls = new ArrayList<>();
+        private long picksAt;
+        private boolean picksLoading;
+        private Thumbs pickThumbs;
         private float dragStartY, dragBase;
         private boolean dragging;
         private VelocityTracker vt;
@@ -165,43 +171,72 @@ final class WallpaperUi {
             hp.bottomMargin = Ui.dpi(c, 12);
             card.addView(handle, hp);
 
-            // --- now showing: a small preview, its name, and the two actions side by side
-            LinearLayout row = new LinearLayout(c);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            card.addView(row, Ui.lp(-1, -2));
-            now = new Ui.RoundImage(c, Ui.dp(c, 14));
-            row.addView(now, Ui.lp(Ui.dpi(c, 54), Ui.dpi(c, 76)));
-            Ui.pressable(now);
+            // --- the wallpaper itself, large, with its name and the two actions on it
+            FrameLayout hero = new FrameLayout(c);
+            hero.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 24)));
+            hero.setClipToOutline(true);
+            card.addView(hero, Ui.lp(-1, Ui.dpi(c, 210)));
+            now = new Ui.RoundImage(c, Ui.dp(c, 24));
+            hero.addView(now, new FrameLayout.LayoutParams(-1, -1));
             now.setClickable(true);
+            now.setOnClickListener(v -> new Browser(host).open());
+
+            // the two actions sit on the picture, bottom right, as plain round buttons
+            LinearLayout heroBar = new LinearLayout(c);
+            heroBar.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+            heroBar.setPadding(0, 0, Ui.dpi(c, 12), Ui.dpi(c, 12));
+            hero.addView(heroBar, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
+
+            shuffle = new Ui.Glyph(c, Ui.G_SHUFFLE, Color.WHITE);
+            shuffleBtn = glassButton(c, shuffle, Ui.ACCENT);
+            shuffleBtn.setOnClickListener(v -> shuffle());
+            heroBar.addView(shuffleBtn, Ui.lp(Ui.dpi(c, 48), Ui.dpi(c, 48)));
+            Ui.Glyph grid = new Ui.Glyph(c, Ui.G_GRID, Color.WHITE);
+            browse = glassButton(c, grid, 0x8C000000);
+            browse.setOnClickListener(v -> new Browser(host).open());
+            LinearLayout.LayoutParams brp = Ui.lp(Ui.dpi(c, 48), Ui.dpi(c, 48));
+            brp.leftMargin = Ui.dpi(c, 10);
+            heroBar.addView(browse, brp);
+
             LinearLayout col = new LinearLayout(c);
             col.setOrientation(LinearLayout.VERTICAL);
-            LinearLayout.LayoutParams colp = new LinearLayout.LayoutParams(0, -2, 1f);
-            colp.leftMargin = Ui.dpi(c, 14);
-            row.addView(col, colp);
-            col.addView(Ui.label(c, "Wallpaper"));
-            nowTitle = Ui.text(c, "", 18, Ui.FG, true);
+            card.addView(col, Ui.lp(-1, -2, Ui.dpi(c, 12)));
+            nowTitle = Ui.text(c, "", 19, Ui.FG, true);
             nowTitle.setTypeface(Ui.font(c, 650));
             nowTitle.setSingleLine(true);
             nowTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            col.addView(nowTitle, Ui.lp(-1, -2, Ui.dpi(c, 4)));
+            col.addView(nowTitle);
             nowSub = Ui.text(c, "", 12, Ui.FG2, false);
             nowSub.setSingleLine(true);
             nowSub.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            col.addView(nowSub, Ui.lp(-1, -2, Ui.dpi(c, 3)));
+            col.addView(nowSub, Ui.lp(-1, -2, Ui.dpi(c, 2)));
 
-            LinearLayout actions = new LinearLayout(c);
-            card.addView(actions, Ui.lp(-1, -2, Ui.dpi(c, 14)));
-            shuffle = new Ui.Pill(c, Ui.G_SHUFFLE, "New one", true);
-            actions.addView(shuffle, new LinearLayout.LayoutParams(0, -2, 1f));
-            browse = new Ui.Pill(c, Ui.G_GRID, "Browse", false);
-            LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(0, -2, 1f);
-            bp.leftMargin = Ui.dpi(c, 10);
-            actions.addView(browse, bp);
-            shuffle.setOnClickListener(v -> shuffle());
-            browse.setOnClickListener(v -> new Browser(host).open());
-            now.setOnClickListener(v -> new Browser(host).open());
+            // --- fresh picks: tap one to preview it and set it
+            LinearLayout pickHead = new LinearLayout(c);
+            pickHead.setGravity(Gravity.CENTER_VERTICAL);
+            card.addView(pickHead, Ui.lp(-1, -2, Ui.dpi(c, 18)));
+            pickHead.addView(Ui.label(c, "Fresh picks"), new LinearLayout.LayoutParams(0, -2, 1f));
+            TextView all = Ui.text(c, "See all", 13, Ui.ACCENT, true);
+            all.setTypeface(Ui.font(c, 600));
+            all.setClickable(true);
+            Ui.pressable(all);
+            all.setOnClickListener(v -> new Browser(host).open());
+            pickHead.addView(all);
+            HorizontalScrollView pickScroll = new HorizontalScrollView(c);
+            pickScroll.setHorizontalScrollBarEnabled(false);
+            pickScroll.setOverScrollMode(OVER_SCROLL_NEVER);
+            pickScroll.setClipToPadding(false);
+            int edge = Ui.dpi(c, 18);
+            pickScroll.setPadding(edge, 0, edge, 0);
+            picks = new LinearLayout(c);
+            pickScroll.addView(picks);
+            LinearLayout.LayoutParams psp = Ui.lp(-1, Ui.dpi(c, 132), Ui.dpi(c, 10));
+            psp.leftMargin = psp.rightMargin = -edge;
+            card.addView(pickScroll, psp);
+            card.setClipToPadding(false);
+            for (int i = 0; i < 6; i++) picks.addView(pickTile(c, null), pickLp(c, i));
 
-            // --- themes: one row that scrolls sideways instead of a wall of chips
+            // --- themes: one row that scrolls sideways
             LinearLayout themeHead = new LinearLayout(c);
             themeHead.setGravity(Gravity.CENTER_VERTICAL);
             card.addView(themeHead, Ui.lp(-1, -2, Ui.dpi(c, 18)));
@@ -211,15 +246,12 @@ final class WallpaperUi {
             themeScroll.setHorizontalScrollBarEnabled(false);
             themeScroll.setOverScrollMode(OVER_SCROLL_NEVER);
             themeScroll.setClipToPadding(false);
+            themeScroll.setPadding(edge, 0, edge, 0);
             LinearLayout chips = new LinearLayout(c);
             themeScroll.addView(chips);
-            // the row runs to the card's edges, so it reads as scrollable
-            int edge = Ui.dpi(c, 18);
-            themeScroll.setPadding(edge, 0, edge, 0);
             LinearLayout.LayoutParams tsp = Ui.lp(-1, -2, Ui.dpi(c, 8));
             tsp.leftMargin = tsp.rightMargin = -edge;
             card.addView(themeScroll, tsp);
-            card.setClipToPadding(false); // let that row reach the card's rounded edge
             final Set<String> chosen = Walls.themes(c);
             for (final Walls.Theme t : Walls.THEMES) {
                 final Ui.Chip chip = new Ui.Chip(c, t.label);
@@ -234,6 +266,7 @@ final class WallpaperUi {
                     chip.setOn(!chip.isOn());
                     if (chip.isOn()) chosen.add(t.key); else chosen.remove(t.key);
                     Walls.setThemes(getContext(), chosen);
+                    picksAt = 0; // fresh picks follow the themes
                     chip.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
                 });
                 LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-2, -2);
@@ -241,7 +274,7 @@ final class WallpaperUi {
                 chips.addView(chip, cp);
             }
 
-            // --- change automatically: a label with when, and the choice in one row
+            // --- change automatically, and the lock screen
             LinearLayout autoHead = new LinearLayout(c);
             autoHead.setGravity(Gravity.CENTER_VERTICAL);
             card.addView(autoHead, Ui.lp(-1, -2, Ui.dpi(c, 18)));
@@ -252,7 +285,6 @@ final class WallpaperUi {
             card.addView(seg, Ui.lp(-1, -2, Ui.dpi(c, 8)));
             seg.setListener(i -> { Walls.setInterval(getContext(), i); refreshNext(); });
 
-            // --- lock screen, one line
             LinearLayout lockRow = new LinearLayout(c);
             lockRow.setGravity(Gravity.CENTER_VERTICAL);
             card.addView(lockRow, Ui.lp(-1, -2, Ui.dpi(c, 16)));
@@ -293,6 +325,82 @@ final class WallpaperUi {
             });
         }
 
+        private View glassButton(Context c, Ui.Glyph g, int color) {
+            int p = Ui.dpi(c, 13);
+            g.setPadding(p, p, p, p);
+            g.setBackground(Ui.round(color, Ui.dp(c, 24)));
+            g.setClickable(true);
+            Ui.pressable(g);
+            return g;
+        }
+
+        private LinearLayout.LayoutParams pickLp(Context c, int i) {
+            LinearLayout.LayoutParams lp = Ui.lp(Ui.dpi(c, 76), -1);
+            if (i > 0) lp.leftMargin = Ui.dpi(c, 8);
+            return lp;
+        }
+
+        private Ui.RoundImage pickTile(Context c, Walls.Wall w) {
+            Ui.RoundImage t = new Ui.RoundImage(c, Ui.dp(c, 16));
+            t.setPlaceholder(w == null ? Ui.GROUP : Ui.darken(w.color, 0.75f));
+            t.setClickable(true);
+            Ui.pressable(t);
+            return t;
+        }
+
+        /** A handful of new wallpapers from the chosen themes; fetched again after ten minutes. */
+        private void loadPicks() {
+            if (picksLoading || (System.currentTimeMillis() - picksAt < 10 * 60_000 && !pickWalls.isEmpty())) return;
+            picksLoading = true;
+            final Context app = getContext().getApplicationContext();
+            host.wallWorker().execute(() -> {
+                List<Walls.Wall> got = new ArrayList<>();
+                try {
+                    List<Walls.Theme> pool = Walls.selectedThemes(app);
+                    java.util.Collections.shuffle(pool);
+                    Walls.Wall cur = Walls.current(app);
+                    for (Walls.Theme t : pool) {
+                        for (Walls.Wall w : Walls.search(t, false, 1, null).walls) {
+                            if (cur != null && cur.id.equals(w.id)) continue;
+                            got.add(w);
+                            if (got.size() >= 4 * Math.max(1, Math.min(3, pool.size())) / Math.max(1, Math.min(3, pool.size()))) break;
+                        }
+                        if (got.size() >= 10) break;
+                    }
+                    java.util.Collections.shuffle(got);
+                } catch (Exception ignored) {}
+                final List<Walls.Wall> result = got.size() > 10 ? got.subList(0, 10) : got;
+                host.runOnUi(() -> {
+                    picksLoading = false;
+                    if (result.isEmpty()) return;
+                    picksAt = System.currentTimeMillis();
+                    pickWalls.clear();
+                    pickWalls.addAll(result);
+                    showPicks();
+                });
+            });
+        }
+
+        private void showPicks() {
+            Context c = getContext();
+            if (pickThumbs == null) pickThumbs = new Thumbs(this::showPickImages);
+            picks.removeAllViews();
+            for (int i = 0; i < pickWalls.size(); i++) {
+                final Walls.Wall w = pickWalls.get(i);
+                Ui.RoundImage t = pickTile(c, w);
+                t.setOnClickListener(v -> new Preview(host, w, pickThumbs.get(w.thumb)).open());
+                picks.addView(t, pickLp(c, i));
+            }
+            showPickImages();
+        }
+
+        private void showPickImages() {
+            for (int i = 0; i < picks.getChildCount() && i < pickWalls.size(); i++) {
+                Bitmap b = pickThumbs.get(pickWalls.get(i).thumb);
+                if (b != null) ((Ui.RoundImage) picks.getChildAt(i)).setBitmap(b);
+            }
+        }
+
         private Thumbs nowThumbs;
 
         void refreshNow() {
@@ -323,7 +431,10 @@ final class WallpaperUi {
         }
 
         private void shuffle() {
-            shuffle.setBusy(true, "Finding one…");
+            shuffle.type = Ui.G_SPIN;
+            shuffle.invalidate();
+            shuffle.animate().rotationBy(3600).setDuration(10000).setInterpolator(new android.view.animation.LinearInterpolator()).start();
+            shuffleBtn.setEnabled(false);
             browse.setEnabled(false);
             final Context app = getContext().getApplicationContext();
             host.wallWorker().execute(() -> {
@@ -331,8 +442,13 @@ final class WallpaperUi {
                 try { Walls.next(app, true); } catch (Exception e) { err = e.getMessage(); }
                 final String error = err;
                 host.runOnUi(() -> {
-                    shuffle.setBusy(false, null);
+                    shuffle.animate().cancel();
+                    shuffle.setRotation(0f);
+                    shuffle.type = Ui.G_SHUFFLE;
+                    shuffle.invalidate();
+                    shuffleBtn.setEnabled(true);
                     browse.setEnabled(true);
+                    picksAt = 0;
                     if (error != null) host.snack(error);
                     else { refreshNow(); refreshNext(); }
                 });
@@ -361,6 +477,7 @@ final class WallpaperUi {
         }
 
         @Override void onOpen() {
+            loadPicks();
             refreshNow();
             refreshNext();
             backdrop.setAlpha(0f);
