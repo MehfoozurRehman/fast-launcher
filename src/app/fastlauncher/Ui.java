@@ -237,11 +237,18 @@ final class Ui {
                 c.clipPath(clip);
                 // map the screen-sized blur so the part under the card is what shows through
                 android.util.DisplayMetrics dm = owner.getResources().getDisplayMetrics();
-                owner.getLocationOnScreen(loc);
-                float sx = owner.getScaleX() == 0 ? 1 : owner.getScaleX(), sy = owner.getScaleY() == 0 ? 1 : owner.getScaleY();
+                // line up with where the card rests, not where an animation has it right now: the
+                // first frame is drawn while it's still off-screen (and often cached in a layer),
+                // which used to leave the glass empty until the card stopped moving
+                int x = owner.getLeft(), y = owner.getTop();
+                if (owner.getParent() instanceof View) {
+                    ((View) owner.getParent()).getLocationOnScreen(loc);
+                    x += loc[0];
+                    y += loc[1];
+                }
                 float s = Math.max(dm.widthPixels / (float) src.getWidth(), dm.heightPixels / (float) src.getHeight());
-                m.setScale(s / sx, s / sy);
-                m.postTranslate(-loc[0] / sx, -loc[1] / sy);
+                m.setScale(s, s);
+                m.postTranslate(-x, -y);
                 c.drawBitmap(src, m, bmp);
                 fill.setColor(tint);
                 c.drawRect(b, fill);

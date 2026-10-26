@@ -149,8 +149,8 @@ final class WallpaperUi {
             card = new LinearLayout(c);
             card.setOrientation(LinearLayout.VERTICAL);
             card.setBackground(Ui.frost(card, Ui.dp(c, 30)));
-            int p = Ui.dpi(c, 20);
-            card.setPadding(p, Ui.dpi(c, 10), p, p);
+            int p = Ui.dpi(c, 18);
+            card.setPadding(p, Ui.dpi(c, 10), p, Ui.dpi(c, 14));
             card.setClickable(true);
             FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
             int m = Ui.dpi(c, 10);
@@ -162,70 +162,64 @@ final class WallpaperUi {
             handle.setBackground(Ui.round(Ui.HANDLE, Ui.dp(c, 2)));
             LinearLayout.LayoutParams hp = Ui.lp(Ui.dpi(c, 36), Ui.dpi(c, 4));
             hp.gravity = Gravity.CENTER_HORIZONTAL;
-            hp.bottomMargin = Ui.dpi(c, 14);
+            hp.bottomMargin = Ui.dpi(c, 12);
             card.addView(handle, hp);
 
-            TextView sheetTitle = Ui.text(c, "Wallpaper", 26, Ui.FG, true);
-            sheetTitle.setTypeface(Ui.font(c, 700));
-            card.addView(sheetTitle);
-            card.addView(Ui.text(c, "Fresh picks from wallhaven.cc", 13.5f, Ui.FG2, false), Ui.lp(-2, -2, Ui.dpi(c, 6)));
-
-            // --- now showing
+            // --- now showing: a small preview, its name, and the two actions side by side
             LinearLayout row = new LinearLayout(c);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            card.addView(row, Ui.lp(-1, -2, Ui.dpi(c, 18)));
-            now = new Ui.RoundImage(c, Ui.dp(c, 18));
-            int tw = Ui.dpi(c, 92);
-            int[] scr = Walls.screenSize(c);
-            row.addView(now, Ui.lp(tw, Math.round(tw * scr[1] / (float) scr[0])));
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            card.addView(row, Ui.lp(-1, -2));
+            now = new Ui.RoundImage(c, Ui.dp(c, 14));
+            row.addView(now, Ui.lp(Ui.dpi(c, 54), Ui.dpi(c, 76)));
             Ui.pressable(now);
             now.setClickable(true);
-
             LinearLayout col = new LinearLayout(c);
             col.setOrientation(LinearLayout.VERTICAL);
-            LinearLayout.LayoutParams colp = new LinearLayout.LayoutParams(0, -1, 1f);
-            colp.leftMargin = Ui.dpi(c, 16);
+            LinearLayout.LayoutParams colp = new LinearLayout.LayoutParams(0, -2, 1f);
+            colp.leftMargin = Ui.dpi(c, 14);
             row.addView(col, colp);
-            col.addView(Ui.label(c, "Now showing"));
-            nowTitle = Ui.text(c, "", 19, Ui.FG, true);
-            nowTitle.setTypeface(Ui.font(c, 600));
-            col.addView(nowTitle, Ui.lp(-1, -2, Ui.dpi(c, 8)));
-            nowSub = Ui.text(c, "", 13, Ui.FG2, false);
-            nowSub.setLineSpacing(0, 1.2f);
-            col.addView(nowSub, Ui.lp(-1, -2, Ui.dpi(c, 6)));
-            View spacer = new View(c);
-            col.addView(spacer, new LinearLayout.LayoutParams(1, 0, 1f));
+            col.addView(Ui.label(c, "Wallpaper"));
+            nowTitle = Ui.text(c, "", 18, Ui.FG, true);
+            nowTitle.setTypeface(Ui.font(c, 650));
+            nowTitle.setSingleLine(true);
+            nowTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            col.addView(nowTitle, Ui.lp(-1, -2, Ui.dpi(c, 4)));
+            nowSub = Ui.text(c, "", 12, Ui.FG2, false);
+            nowSub.setSingleLine(true);
+            nowSub.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            col.addView(nowSub, Ui.lp(-1, -2, Ui.dpi(c, 3)));
+
+            LinearLayout actions = new LinearLayout(c);
+            card.addView(actions, Ui.lp(-1, -2, Ui.dpi(c, 14)));
             shuffle = new Ui.Pill(c, Ui.G_SHUFFLE, "New one", true);
-            col.addView(shuffle, Ui.lp(-1, -2));
+            actions.addView(shuffle, new LinearLayout.LayoutParams(0, -2, 1f));
             browse = new Ui.Pill(c, Ui.G_GRID, "Browse", false);
-            col.addView(browse, Ui.lp(-1, -2, Ui.dpi(c, 10)));
+            LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(0, -2, 1f);
+            bp.leftMargin = Ui.dpi(c, 10);
+            actions.addView(browse, bp);
             shuffle.setOnClickListener(v -> shuffle());
             browse.setOnClickListener(v -> new Browser(host).open());
             now.setOnClickListener(v -> new Browser(host).open());
 
-            // --- auto change
-            LinearLayout g1 = Ui.group(c);
-            card.addView(g1, Ui.lp(-1, -2, Ui.dpi(c, 20)));
-            LinearLayout autoHead = new LinearLayout(c);
-            autoHead.setGravity(Gravity.CENTER_VERTICAL);
-            g1.addView(autoHead, Ui.lp(-1, -2));
-            autoHead.addView(Ui.label(c, "Change automatically"), new LinearLayout.LayoutParams(0, -2, 1f));
-            nextText = Ui.text(c, "", 12.5f, Ui.FG3, false);
-            autoHead.addView(nextText);
-            Ui.Segmented seg = new Ui.Segmented(c, Walls.INTERVAL_LABELS, Walls.interval(c));
-            g1.addView(seg, Ui.lp(-1, -2, Ui.dpi(c, 12)));
-            seg.setListener(i -> { Walls.setInterval(getContext(), i); refreshNext(); });
-
-            // --- themes
-            LinearLayout g2 = Ui.group(c);
-            card.addView(g2, Ui.lp(-1, -2, Ui.dpi(c, 10)));
+            // --- themes: one row that scrolls sideways instead of a wall of chips
             LinearLayout themeHead = new LinearLayout(c);
             themeHead.setGravity(Gravity.CENTER_VERTICAL);
-            g2.addView(themeHead, Ui.lp(-1, -2));
+            card.addView(themeHead, Ui.lp(-1, -2, Ui.dpi(c, 18)));
             themeHead.addView(Ui.label(c, "Themes"), new LinearLayout.LayoutParams(0, -2, 1f));
-            themeHead.addView(Ui.text(c, "New ones come from these", 12.5f, Ui.FG3, false));
-            Ui.Flow flow = new Ui.Flow(c, Ui.dpi(c, 8));
-            g2.addView(flow, Ui.lp(-1, -2, Ui.dpi(c, 12)));
+            themeHead.addView(Ui.text(c, "New ones come from these", 11.5f, Ui.FG3, false));
+            HorizontalScrollView themeScroll = new HorizontalScrollView(c);
+            themeScroll.setHorizontalScrollBarEnabled(false);
+            themeScroll.setOverScrollMode(OVER_SCROLL_NEVER);
+            themeScroll.setClipToPadding(false);
+            LinearLayout chips = new LinearLayout(c);
+            themeScroll.addView(chips);
+            // the row runs to the card's edges, so it reads as scrollable
+            int edge = Ui.dpi(c, 18);
+            themeScroll.setPadding(edge, 0, edge, 0);
+            LinearLayout.LayoutParams tsp = Ui.lp(-1, -2, Ui.dpi(c, 8));
+            tsp.leftMargin = tsp.rightMargin = -edge;
+            card.addView(themeScroll, tsp);
+            card.setClipToPadding(false); // let that row reach the card's rounded edge
             final Set<String> chosen = Walls.themes(c);
             for (final Walls.Theme t : Walls.THEMES) {
                 final Ui.Chip chip = new Ui.Chip(c, t.label);
@@ -242,32 +236,39 @@ final class WallpaperUi {
                     Walls.setThemes(getContext(), chosen);
                     chip.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
                 });
-                flow.addView(chip);
+                LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-2, -2);
+                if (chips.getChildCount() > 0) cp.leftMargin = Ui.dpi(c, 8);
+                chips.addView(chip, cp);
             }
 
-            // --- lock screen
-            LinearLayout lockRow = Ui.group(c);
-            lockRow.setOrientation(LinearLayout.HORIZONTAL);
+            // --- change automatically: a label with when, and the choice in one row
+            LinearLayout autoHead = new LinearLayout(c);
+            autoHead.setGravity(Gravity.CENTER_VERTICAL);
+            card.addView(autoHead, Ui.lp(-1, -2, Ui.dpi(c, 18)));
+            autoHead.addView(Ui.label(c, "Change automatically"), new LinearLayout.LayoutParams(0, -2, 1f));
+            nextText = Ui.text(c, "", 11.5f, Ui.FG3, false);
+            autoHead.addView(nextText);
+            Ui.Segmented seg = new Ui.Segmented(c, Walls.INTERVAL_LABELS, Walls.interval(c));
+            card.addView(seg, Ui.lp(-1, -2, Ui.dpi(c, 8)));
+            seg.setListener(i -> { Walls.setInterval(getContext(), i); refreshNext(); });
+
+            // --- lock screen, one line
+            LinearLayout lockRow = new LinearLayout(c);
             lockRow.setGravity(Gravity.CENTER_VERTICAL);
-            card.addView(lockRow, Ui.lp(-1, -2, Ui.dpi(c, 10)));
-            LinearLayout lockText = new LinearLayout(c);
-            lockText.setOrientation(LinearLayout.VERTICAL);
-            lockRow.addView(lockText, new LinearLayout.LayoutParams(0, -2, 1f));
-            lockText.addView(Ui.text(c, "Lock screen too", 16, Ui.FG, true));
-            lockText.addView(Ui.text(c, "Use the same picture when the phone is locked", 12.5f, Ui.FG3, false),
-                    Ui.lp(-2, -2, Ui.dpi(c, 5)));
+            card.addView(lockRow, Ui.lp(-1, -2, Ui.dpi(c, 16)));
+            lockRow.addView(Ui.text(c, "Use on the lock screen too", 14.5f, Ui.FG, true), new LinearLayout.LayoutParams(0, -2, 1f));
             Ui.Toggle toggle = new Ui.Toggle(c, Walls.lockToo(c));
             toggle.setListener(v -> Walls.setLockToo(getContext(), v == 1));
             lockRow.addView(toggle);
 
             // --- a quiet way to send a report from the phone itself (no computer needed)
-            TextView report = Ui.text(c, "Something not working?  Report a problem", 13, Ui.FG2, false);
+            TextView report = Ui.text(c, "Something not working?  Report a problem", 12.5f, Ui.FG3, false);
             report.setGravity(Gravity.CENTER);
-            report.setPadding(0, Ui.dpi(c, 12), 0, Ui.dpi(c, 2));
+            report.setPadding(0, Ui.dpi(c, 10), 0, 0);
             report.setClickable(true);
             Ui.pressable(report);
             report.setOnClickListener(v -> shareReport());
-            card.addView(report, Ui.lp(-1, -2, Ui.dpi(c, 6)));
+            card.addView(report, Ui.lp(-1, -2, Ui.dpi(c, 8)));
 
             refreshNow();
             refreshNext();
@@ -304,7 +305,7 @@ final class WallpaperUi {
             }
             now.setPlaceholder(Ui.darken(w.color, 0.6f));
             nowTitle.setText(w.theme == null || w.theme.isEmpty() ? "Wallhaven" : w.theme);
-            nowSub.setText(w.width + " × " + w.height + "\nwallhaven.cc/w/" + w.id);
+            nowSub.setText("wallhaven.cc  ·  " + w.width + " × " + w.height);
             if (nowThumbs == null) nowThumbs = new Thumbs(() -> refreshNow());
             Bitmap b = nowThumbs.get(w.thumb);
             if (b != null) now.setBitmap(b);
