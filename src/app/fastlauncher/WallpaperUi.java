@@ -134,7 +134,6 @@ final class WallpaperUi {
         private final View shuffleBtn, browse;
         private final LinearLayout picks;
         private final List<Walls.Wall> pickWalls = new ArrayList<>();
-        private long picksAt;
         private boolean picksLoading;
         private Thumbs pickThumbs;
         private float dragStartY, dragBase;
@@ -216,6 +215,13 @@ final class WallpaperUi {
             pickHead.setGravity(Gravity.CENTER_VERTICAL);
             card.addView(pickHead, Ui.lp(-1, -2, Ui.dpi(c, 18)));
             pickHead.addView(Ui.label(c, "Fresh picks"), new LinearLayout.LayoutParams(0, -2, 1f));
+            TextView refresh = Ui.text(c, "Refresh", 13, Ui.ACCENT, true);
+            refresh.setTypeface(Ui.font(c, 600));
+            refresh.setPadding(0, 0, Ui.dpi(c, 18), 0);
+            refresh.setClickable(true);
+            Ui.pressable(refresh);
+            refresh.setOnClickListener(v -> fetchPicks());
+            pickHead.addView(refresh);
             TextView all = Ui.text(c, "See all", 13, Ui.ACCENT, true);
             all.setTypeface(Ui.font(c, 600));
             all.setClickable(true);
@@ -235,6 +241,7 @@ final class WallpaperUi {
             card.addView(pickScroll, psp);
             card.setClipToPadding(false);
             for (int i = 0; i < PICKS; i++) picks.addView(pickTile(c, null), pickLp(c, i));
+            Thumbs.disk = new java.io.File(c.getCacheDir(), "thumbs");
 
             // --- themes: one row that scrolls sideways
             LinearLayout themeHead = new LinearLayout(c);
@@ -266,7 +273,6 @@ final class WallpaperUi {
                     chip.setOn(!chip.isOn());
                     if (chip.isOn()) chosen.add(t.key); else chosen.remove(t.key);
                     Walls.setThemes(getContext(), chosen);
-                    picksAt = 0; // fresh picks follow the themes
                     chip.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
                 });
                 LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-2, -2);
@@ -361,8 +367,10 @@ final class WallpaperUi {
                 pulse.setRepeatCount(android.animation.ValueAnimator.INFINITE);
                 pulse.addUpdateListener(a -> {
                     float v = (Float) a.getAnimatedValue();
+                    // every tile still waiting for its picture breathes; loaded ones stay still
                     for (int i = 0; i < picks.getChildCount(); i++) {
-                        if (i >= pickWalls.size()) picks.getChildAt(i).setAlpha(v);
+                        Ui.RoundImage t = (Ui.RoundImage) picks.getChildAt(i);
+                        t.setAlpha(t.bitmap() == null ? v : 1f);
                     }
                 });
                 pulse.start();
@@ -373,11 +381,24 @@ final class WallpaperUi {
             }
         }
 
-        /** A handful of new wallpapers from the chosen themes; fetched again after ten minutes. */
+        /** The picks you had last time (kept on the phone); new ones only the first time or on Refresh. */
         private void loadPicks() {
-            if (picksLoading || (System.currentTimeMillis() - picksAt < 10 * 60_000 && !pickWalls.isEmpty())) return;
+            if (!pickWalls.isEmpty() || picksLoading) return;
+            try {
+                org.json.JSONArray a = new org.json.JSONArray(Walls.prefs(getContext()).getString("picks", "[]"));
+                for (int i = 0; i < a.length() && i < PICKS; i++) pickWalls.add(Walls.Wall.fromJson(a.getJSONObject(i)));
+            } catch (Exception ignored) {}
+            if (!pickWalls.isEmpty()) { showPicks(); return; }
+            fetchPicks();
+        }
+
+        /** A new handful from the chosen themes; replaces the saved ones. */
+        private void fetchPicks() {
+            if (picksLoading) return;
             picksLoading = true;
-            if (pickWalls.isEmpty()) setLoading(true);
+            for (int i = 0; i < picks.getChildCount(); i++) ((Ui.RoundImage) picks.getChildAt(i)).setBitmap(null);
+            pickWalls.clear();
+            setLoading(true);
             final Context app = getContext().getApplicationContext();
             host.wallWorker().execute(() -> {
                 List<Walls.Wall> got = new ArrayList<>();
@@ -399,10 +420,14 @@ final class WallpaperUi {
                 host.runOnUi(() -> {
                     picksLoading = false;
                     setLoading(false);
-                    if (result.isEmpty()) return;
-                    picksAt = System.currentTimeMillis();
+                    if (result.isEmpty()) { host.snack("Couldn't load new picks"); loadPicks(); return; }
                     pickWalls.clear();
                     pickWalls.addAll(result);
+                    try {
+                        org.json.JSONArray a = new org.json.JSONArray();
+                        for (Walls.Wall w : result) a.put(w.toJson());
+                        Walls.prefs(getContext()).edit().putString("picks", a.toString()).apply();
+                    } catch (Exception ignored) {}
                     showPicks();
                 });
             });
@@ -423,11 +448,14 @@ final class WallpaperUi {
         }
 
         private void showPickImages() {
+            boolean waiting = false;
             for (int i = 0; i < picks.getChildCount() && i < pickWalls.size(); i++) {
                 Bitmap b = pickThumbs.get(pickWalls.get(i).thumb);
                 Ui.RoundImage t = (Ui.RoundImage) picks.getChildAt(i);
                 if (b != null && t.bitmap() != b) t.setBitmap(b);
+                if (t.bitmap() == null) waiting = true;
             }
+            setLoading(waiting); // keep breathing until every picture is in
         }
 
         private Thumbs nowThumbs;
@@ -477,7 +505,6 @@ final class WallpaperUi {
                     shuffle.invalidate();
                     shuffleBtn.setEnabled(true);
                     browse.setEnabled(true);
-                    picksAt = 0;
                     if (error != null) host.snack(error);
                     else { refreshNow(); refreshNext(); }
                 });

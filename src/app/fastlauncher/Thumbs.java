@@ -40,6 +40,33 @@ final class Thumbs {
         pool.allowCoreThreadTimeOut(true);
     }
 
+    /** Thumbnails kept on disk too (set once from a context), so they come back instantly later. */
+    static volatile java.io.File disk;
+    private static final long DISK_MAX = 30L * 1024 * 1024;
+
+    private static java.io.File diskFile(String url) {
+        java.io.File dir = disk;
+        if (dir == null) return null;
+        if (!dir.isDirectory()) dir.mkdirs();
+        return new java.io.File(dir, Integer.toHexString(url.hashCode()) + "_" + url.length() + ".img");
+    }
+
+    /** Keep the disk cache under its cap: the oldest files go first. */
+    private static void trimDisk() {
+        java.io.File dir = disk;
+        java.io.File[] fs = dir == null ? null : dir.listFiles();
+        if (fs == null) return;
+        long total = 0;
+        for (java.io.File f : fs) total += f.length();
+        if (total <= DISK_MAX) return;
+        java.util.Arrays.sort(fs, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
+        for (java.io.File f : fs) {
+            if (total <= DISK_MAX * 3 / 4) break;
+            total -= f.length();
+            f.delete();
+        }
+    }
+
     Bitmap get(final String url) {
         if (url == null || url.isEmpty()) return null;
         Bitmap b = cache.get(url);
@@ -47,7 +74,19 @@ final class Thumbs {
         pool.execute(() -> {
             Bitmap out = null;
             try {
-                byte[] data = Walls.get(url, 15000);
+                java.io.File f = diskFile(url);
+                byte[] data = null;
+                if (f != null && f.exists()) {
+                    try { data = java.nio.file.Files.readAllBytes(f.toPath()); f.setLastModified(System.currentTimeMillis()); }
+                    catch (Exception e) { data = null; }
+                }
+                if (data == null) {
+                    data = Walls.get(url, 15000);
+                    if (f != null) {
+                        try (java.io.FileOutputStream fo = new java.io.FileOutputStream(f)) { fo.write(data); } catch (Exception ignored) {}
+                        trimDisk();
+                    }
+                }
                 BitmapFactory.Options o = new BitmapFactory.Options();
                 o.inPreferredConfig = Bitmap.Config.RGB_565;
                 Bitmap src = BitmapFactory.decodeByteArray(data, 0, data.length, o);

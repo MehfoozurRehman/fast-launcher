@@ -60,8 +60,8 @@ final class Ui {
     }
 
     /**
-     * Pick the accent from the wallpaper's main colours: the most colourful of them, made vivid
-     * enough to read as an accent and dark enough that white text on it stays readable.
+     * Pick the accent from the wallpaper's main colours: the most colourful of them, in a soft,
+     * muted tone, and dark enough that white text on it stays readable.
      */
     static int seedFrom(int[] colors) {
         int best = 0;
@@ -78,8 +78,9 @@ final class Ui {
     private static int accentFor(int seed, boolean dark) {
         if (seed == 0) return dark ? 0xFF3D7FFF : 0xFF256FFF;
         float[] hsl = hsl(seed);
-        float s = Math.max(0.55f, Math.min(0.85f, hsl[1] * 1.15f));
-        float l = dark ? 0.58f : 0.50f;
+        // soft, muted tones: the wallpaper's hue at a gentle saturation, not a loud one
+        float s = Math.max(0.26f, Math.min(0.46f, hsl[1] * 0.7f));
+        float l = dark ? 0.56f : 0.50f;
         int c = fromHsl(hsl[0], s, l);
         // white text sits on the accent (active tiles, buttons): keep its luminance below ~0.28
         while (luminance(c) > 0.28f && l > 0.2f) { l -= 0.02f; c = fromHsl(hsl[0], s, l); }
