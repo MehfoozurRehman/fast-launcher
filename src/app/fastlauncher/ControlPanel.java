@@ -176,11 +176,12 @@ final class ControlPanel extends FrameLayout {
         head.setPadding(Ui.dpi(c, 22), 0, Ui.dpi(c, 14), Ui.dpi(c, 4));
         LinearLayout tcol = new LinearLayout(c);
         tcol.setOrientation(LinearLayout.VERTICAL);
-        time = Ui.text(c, "", 28, Ui.FG, true);
-        time.setTypeface(Ui.font(c, 650));
-        date = Ui.text(c, "", 13.5f, Ui.FG2, false);
+        // the page's name and the date (time and battery are already in the status row above)
+        time = Ui.text(c, "Controls", 24, Ui.FG, true);
+        time.setTypeface(Ui.font(c, 700));
+        date = Ui.text(c, "", 13, Ui.FG2, false);
         tcol.addView(time);
-        tcol.addView(date, Ui.lp(-2, -2, Ui.dpi(c, 4)));
+        tcol.addView(date, Ui.lp(-2, -2, Ui.dpi(c, 3)));
         head.addView(tcol, new LinearLayout.LayoutParams(0, -2, 1f));
         // notifications: a pill with the bell and how many there are; tap to switch pages
         notifButton = new LinearLayout(c);
@@ -243,11 +244,7 @@ final class ControlPanel extends FrameLayout {
         npage.setOrientation(LinearLayout.VERTICAL);
         npage.setPadding(pad, 0, pad, Ui.dpi(c, 4));
         LinearLayout nhead = new LinearLayout(c);
-        nhead.setGravity(Gravity.CENTER_VERTICAL);
-        nhead.setPadding(Ui.dpi(c, 10), 0, 0, 0);
-        TextView ntitle = Ui.text(c, "Notifications", 17, Ui.FG, true);
-        ntitle.setTypeface(Ui.font(c, 650));
-        nhead.addView(ntitle, new LinearLayout.LayoutParams(0, -2, 1f));
+        nhead.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         // recently dismissed: a small, quiet link in the title row, not a bar in the list
         historyButton = Ui.text(c, "History", 13, Ui.FG3, false);
         historyButton.setPadding(Ui.dpi(c, 12), Ui.dpi(c, 8), Ui.dpi(c, 10), Ui.dpi(c, 8));
@@ -608,12 +605,7 @@ final class ControlPanel extends FrameLayout {
         // missing permission must never take the home screen down with it.
         safe(() -> {
             Calendar cal = Calendar.getInstance();
-            time.setText(MainActivity.clockText(cal));
-            String d = new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(cal.getTime());
-            android.os.BatteryManager bm = (android.os.BatteryManager) c.getSystemService(Context.BATTERY_SERVICE);
-            int level = bm == null ? -1 : bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY);
-            if (level >= 0) d += "  ·  " + level + "%" + (bm.isCharging() ? (level >= 100 ? " charged" : " charging") : "");
-            setIfChanged(date, d);
+            setIfChanged(date, new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(cal.getTime()));
         });
         final WifiManager wm = (WifiManager) c.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         safe(() -> {
@@ -1188,6 +1180,7 @@ final class ControlPanel extends FrameLayout {
         }
         page = p;
         resetPageLooks();
+        setIfChanged(time, p == NOTIFS ? "Notifications" : p == BT ? "Bluetooth" : "Controls");
         scroll.setVisibility(p == CONTROLS ? VISIBLE : GONE);
         notifScroll.setVisibility(p == NOTIFS ? VISIBLE : GONE);
         btScroll.setVisibility(p == BT ? VISIBLE : GONE);
@@ -1402,6 +1395,7 @@ final class ControlPanel extends FrameLayout {
         final Context c = getContext();
         List<NotifService.Gone> h = NotifService.history(c);
         historyButton.setVisibility(h.isEmpty() ? GONE : VISIBLE);
+        ((View) historyButton.getParent()).setVisibility(h.isEmpty() ? GONE : VISIBLE);
         historyButton.setText(historyOpen ? "Hide history" : "History");
         historyButton.setTextColor(historyOpen ? Ui.ACCENT : Ui.FG3);
         historyList.removeAllViews();
