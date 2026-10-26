@@ -381,6 +381,9 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
                     // frame draws nothing visible, so the panel's first visible frame is cheap
                     ensurePanel();
                     if (!panelOpen) {
+                        // the accent followed a new wallpaper since the panel was built: rebuild it
+                        Ui.theme(PanelService.this);
+                        if (panel.builtAccent != Ui.ACCENT || panel.isDark != Ui.dark) rebuildPanel();
                         captureBehind();
                         panel.refresh(e.getRawX() < getWidth() * 0.45f);
                     }
@@ -491,6 +494,13 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
                 || was.fontScale != c.fontScale || was.densityDpi != c.densityDpi || !was.getLocales().equals(c.getLocales()));
         if (!restyle) return;
         if (panelOpen) finishHide();
+        try { wm.removeView(panel); } catch (Exception ignored) {}
+        panel.destroy();
+        panel = null;
+        ensurePanel();
+    }
+
+    private void rebuildPanel() {
         try { wm.removeView(panel); } catch (Exception ignored) {}
         panel.destroy();
         panel = null;

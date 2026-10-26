@@ -116,6 +116,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         Diag.install(this);
         Ui.theme(this);
         builtDark = Ui.dark;
+        builtAccent = Ui.ACCENT;
         builtConfig = new android.content.res.Configuration(getResources().getConfiguration());
         dp = getResources().getDisplayMetrics().density;
         iconPx = Math.round(48 * dp);
@@ -184,6 +185,17 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 return;
             }
             if ("testnotif".equals(what)) { postTestNotification(); return; }
+            if (what != null && what.startsWith("seed:")) { // adb: preview an accent from any colour
+                seedPreview = true;
+                if (Ui.setSeed(MainActivity.this, Ui.seedFrom(new int[]{(int) Long.parseLong(what.substring(5), 16) | 0xFF000000}))) recreate();
+                return;
+            }
+            if ("seedreset".equals(what)) { // back to the wallpaper's own colour
+                seedPreview = false;
+                try { onWallColors(WallpaperManager.getInstance(MainActivity.this).getWallpaperColors(WallpaperManager.FLAG_SYSTEM)); }
+                catch (Exception ignored) {}
+                return;
+            }
             if ("tiles".equals(what)) { PanelService.dumpSystemTiles(); return; }
             if (what != null && what.startsWith("tile:")) {
                 PanelService.pressSystemTile(what.substring(5), ok -> Diag.log("tile result " + ok));
@@ -255,6 +267,8 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private android.content.res.Configuration builtConfig;
 
     private boolean builtDark;
+    private static boolean seedPreview; // adb colour preview in force: the wallpaper doesn't override it
+    private int builtAccent;
 
     @Override protected void onDestroy() {
         unregisterReceiver(pkgReceiver);
@@ -329,7 +343,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         super.onResume();
         // a light/dark switch that happened while we were in the background
         Ui.theme(this);
-        if (builtDark != Ui.dark) { recreate(); return; }
+        if (builtDark != Ui.dark || builtAccent != Ui.ACCENT) { recreate(); return; }
         NotifService.listener = notifChanged;
         // put the panel's service back if a phone cleaner force-stopped us (Android turns it off)
         final Context appCtx = getApplicationContext();
@@ -597,6 +611,11 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         }
         brightWall = bright;
         topLuma = -1f; // until the new blur has been analysed
+        // the launcher's accent follows the wallpaper: rebuild with it when it changes
+        int seed = Ui.seedFrom(new int[]{wc.getPrimaryColor().toArgb(),
+                wc.getSecondaryColor() == null ? 0 : wc.getSecondaryColor().toArgb(),
+                wc.getTertiaryColor() == null ? 0 : wc.getTertiaryColor().toArgb()});
+        if (!seedPreview && Ui.setSeed(this, seed)) { main.post(this::recreate); return; }
         if (coverPending) {
             // the system has the new wallpaper; give it a beat to draw, then drop our copy
             main.removeCallbacks(fadeCover);

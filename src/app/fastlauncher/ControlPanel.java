@@ -90,6 +90,7 @@ final class ControlPanel extends FrameLayout {
     private final LinearLayout btList;
     private final TextView btToggle;
     final boolean isDark = Ui.dark; // the palette this panel was built in
+    final int builtAccent = Ui.ACCENT;
     private final FrameLayout scrim;
     private final ImageView backdrop;
     private final View backdropBase;

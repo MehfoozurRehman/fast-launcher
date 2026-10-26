@@ -188,7 +188,7 @@ final class SearchExtras extends LinearLayout {
         TextView t = Ui.text(c, k.name.substring(0, 1).toUpperCase(Locale.getDefault()), 16, Color.WHITE, true);
         t.setTypeface(Ui.font(c, 650));
         t.setGravity(Gravity.CENTER);
-        t.setBackground(Ui.round(0xFF3D7FFF, s / 2f));
+        t.setBackground(Ui.round(Ui.ACCENT, s / 2f));
         return t;
     }
 

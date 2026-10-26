@@ -41,8 +41,89 @@ final class Ui {
         int night = c.getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
         boolean d = night != android.content.res.Configuration.UI_MODE_NIGHT_NO;
         boolean changed = d != dark;
+        seed = c.getSharedPreferences("ui", Context.MODE_PRIVATE).getInt("seed", 0);
         apply(d);
         return changed;
+    }
+
+    /** The wallpaper's colour the accent is drawn from; 0 = none (a grey wallpaper): the default blue. */
+    static int seed;
+
+    /** Remember a new wallpaper colour; true if the accent changes (the caller rebuilds). */
+    static boolean setSeed(Context c, int s) {
+        if (s == seed) return false;
+        c.getSharedPreferences("ui", Context.MODE_PRIVATE).edit().putInt("seed", s).apply();
+        int before = ACCENT;
+        seed = s;
+        apply(dark);
+        return before != ACCENT;
+    }
+
+    /**
+     * Pick the accent from the wallpaper's main colours: the most colourful of them, made vivid
+     * enough to read as an accent and dark enough that white text on it stays readable.
+     */
+    static int seedFrom(int[] colors) {
+        int best = 0;
+        float bestScore = 0f;
+        for (int col : colors) {
+            if (col == 0) continue;
+            float[] hsl = hsl(col);
+            float chroma = hsl[1] * (1f - Math.abs(2f * hsl[2] - 1f)); // saturation that's actually visible
+            if (chroma > bestScore) { bestScore = chroma; best = col; }
+        }
+        return bestScore < 0.10f ? 0 : best | 0xFF000000;
+    }
+
+    private static int accentFor(int seed, boolean dark) {
+        if (seed == 0) return dark ? 0xFF3D7FFF : 0xFF256FFF;
+        float[] hsl = hsl(seed);
+        float s = Math.max(0.55f, Math.min(0.85f, hsl[1] * 1.15f));
+        float l = dark ? 0.58f : 0.50f;
+        int c = fromHsl(hsl[0], s, l);
+        // white text sits on the accent (active tiles, buttons): keep its luminance below ~0.28
+        while (luminance(c) > 0.28f && l > 0.2f) { l -= 0.02f; c = fromHsl(hsl[0], s, l); }
+        return c;
+    }
+
+    private static float luminance(int c) {
+        return 0.2126f * lin((c >> 16) & 255) + 0.7152f * lin((c >> 8) & 255) + 0.0722f * lin(c & 255);
+    }
+
+    private static float lin(int v) {
+        float x = v / 255f;
+        return x <= 0.04045f ? x / 12.92f : (float) Math.pow((x + 0.055f) / 1.055f, 2.4f);
+    }
+
+    private static float[] hsl(int c) {
+        float r = ((c >> 16) & 255) / 255f, g = ((c >> 8) & 255) / 255f, b = (c & 255) / 255f;
+        float max = Math.max(r, Math.max(g, b)), min = Math.min(r, Math.min(g, b)), l = (max + min) / 2f;
+        float h = 0f, s = 0f;
+        if (max != min) {
+            float dd = max - min;
+            s = l > 0.5f ? dd / (2f - max - min) : dd / (max + min);
+            if (max == r) h = (g - b) / dd + (g < b ? 6 : 0);
+            else if (max == g) h = (b - r) / dd + 2;
+            else h = (r - g) / dd + 4;
+            h *= 60f;
+        }
+        return new float[]{h, s, l};
+    }
+
+    private static int fromHsl(float h, float s, float l) {
+        float q = l < 0.5f ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+        float hk = h / 360f;
+        float r = hue(p, q, hk + 1f / 3), g = hue(p, q, hk), b = hue(p, q, hk - 1f / 3);
+        return 0xFF000000 | (Math.round(r * 255) << 16) | (Math.round(g * 255) << 8) | Math.round(b * 255);
+    }
+
+    private static float hue(float p, float q, float t) {
+        if (t < 0) t += 1;
+        if (t > 1) t -= 1;
+        if (t < 1f / 6) return p + (q - p) * 6 * t;
+        if (t < 1f / 2) return q;
+        if (t < 2f / 3) return p + (q - p) * (2f / 3 - t) * 6;
+        return p;
     }
 
     private static void apply(boolean d) {
@@ -53,13 +134,13 @@ final class Ui {
             FG = 0xFFEAEAEA; FG2 = 0xFFA9A9A9; FG3 = 0xFF8C8C8C;
             LINE = 0x1AFFFFFF; PRESS = 0x1FFFFFFF; HANDLE = 0x52FFFFFF; SCRIM = 0xB3000000; BG = 0xFF1F1F1F;
             TRACK = 0xFF4E4E4E; STRONG = 0xFFEAEAEA; ON_STRONG = 0xFF191919;
-            ACCENT = 0xFF3D7FFF; DANGER = 0xFFFF6B60; DANGER_BG = 0x33FF453A;
+            ACCENT = accentFor(seed, true); DANGER = 0xFFFF6B60; DANGER_BG = 0x33FF453A;
         } else {
             CARD = 0xFFFFFFFF; GROUP = 0x8CFFFFFF; FILL = 0xB3FFFFFF; ICON_BG = 0xE6FFFFFF;
             FG = 0xFF191919; FG2 = 0xFF5F6368; FG3 = 0xFF8A8F96;
             LINE = 0x14000000; PRESS = 0x14000000; HANDLE = 0x33000000; SCRIM = 0x73000000; BG = 0xFFF5F6F8;
-            TRACK = 0xFFD5D8DD; STRONG = 0xFF256FFF; ON_STRONG = 0xFFFFFFFF;
-            ACCENT = 0xFF256FFF; DANGER = 0xFFE5392F; DANGER_BG = 0x1FE5392F;
+            ACCENT = accentFor(seed, false); DANGER = 0xFFE5392F; DANGER_BG = 0x1FE5392F;
+            TRACK = 0xFFD5D8DD; STRONG = ACCENT; ON_STRONG = 0xFFFFFFFF;
         }
         INK = ON_STRONG;
     }
