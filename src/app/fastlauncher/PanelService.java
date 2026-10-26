@@ -348,12 +348,15 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
     private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
 
     /** Opens the notifications page from the launcher (swipe down on home). */
-    static boolean openNotifications() {
+    static boolean openNotifications() { return openSide(true); }
+
+    /** Open on a page from the launcher (a swipe down on home): notifications, or the controls. */
+    static boolean openSide(boolean notifications) {
         PanelService s = running;
         if (s == null) return false;
         s.ensurePanel();
-        if (!s.panelOpen) { s.captureBehind(); s.panel.refresh(true); }
-        else s.panel.openPage(true); // open or still closing: switch to notifications, don't reuse the old page
+        if (!s.panelOpen) { s.captureBehind(); s.panel.refresh(notifications); }
+        else s.panel.openPage(notifications); // open or still closing: switch, don't reuse the old page
         s.showPanel();
         s.panel.animateTo(1f, 0f);
         return true;

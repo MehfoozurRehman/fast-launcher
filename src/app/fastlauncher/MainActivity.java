@@ -1113,6 +1113,11 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
     /** StatusBarManager.expandNotificationsPanel is hidden API, but launchers have used it for years. */
     @SuppressWarnings("JavaReflectionMemberAccess")
+    private void expandNotifications(boolean notifications) {
+        if (PanelService.openSide(notifications)) return;
+        expandNotifications();
+    }
+
     private void expandNotifications() {
         // our own notifications page when the panel service is on, otherwise the system shade
         if (PanelService.openNotifications()) return;
@@ -1648,7 +1653,9 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 if (!shadeFired) {
                     shadeFired = true;
                     removeCallbacks(homeLongPress);
-                    expandNotifications();
+                    // starting near the top: the same left/right rule as the status bar; lower: notifications
+                    boolean top = downY < insetTop + dpi(160);
+                    expandNotifications(!(top && downX > getWidth() * 0.45f));
                 }
                 return true;
             }

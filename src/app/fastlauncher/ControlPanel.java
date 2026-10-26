@@ -171,7 +171,7 @@ final class ControlPanel extends FrameLayout {
         addView(statusRow, new LayoutParams(-1, h.statusBarHeight(), Gravity.TOP));
 
         // ---- header
-        LinearLayout head = new LinearLayout(c);
+        head = new LinearLayout(c);
         head.setGravity(Gravity.CENTER_VERTICAL);
         head.setPadding(Ui.dpi(c, 22), 0, Ui.dpi(c, 14), Ui.dpi(c, 4));
         LinearLayout tcol = new LinearLayout(c);
@@ -1958,7 +1958,9 @@ final class ControlPanel extends FrameLayout {
                 float edge = Ui.dp(getContext(), 24);
                 fromEdge = downX < edge || downX > getWidth() - edge;
                 // a pull from the status bar area while open: switch pages, like a pull when closed
-                topPull = downY < host.statusBarHeight() + Ui.dp(getContext(), 16);
+                // the whole top: the status row and the header with the page's name (a thumb rarely
+                // starts on the very top pixels)
+                topPull = downY < card.getTop() + head.getBottom() + Ui.dp(getContext(), 20);
                 topPulling = false;
                 reopening = false;
                 if (vt != null) vt.recycle();
@@ -2020,6 +2022,7 @@ final class ControlPanel extends FrameLayout {
     }
 
     private boolean topPull, topPulling, reopening;
+    private LinearLayout head;
     private int dropTo = -1;
     private ValueAnimator dropAnim;
 
