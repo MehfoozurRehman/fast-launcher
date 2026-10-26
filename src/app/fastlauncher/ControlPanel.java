@@ -165,6 +165,9 @@ final class ControlPanel extends FrameLayout {
         clp.topMargin = h.statusBarHeight() + Ui.dpi(c, 6);
         clp.bottomMargin = Ui.dpi(c, 24); // a floating card, never running off the screen
         addView(card, clp);
+        // our window covers the real status bar, so the panel carries its own copy of it
+        statusRow = new StatusRow(c);
+        addView(statusRow, new LayoutParams(-1, h.statusBarHeight(), Gravity.TOP));
 
         // ---- header
         LinearLayout head = new LinearLayout(c);
@@ -570,7 +573,19 @@ final class ControlPanel extends FrameLayout {
     }
 
     /** Re-read every control's state; called the moment a finger lands on the pull strip. */
+    private final StatusRow statusRow;
+
+    private final Runnable statusTick = new Runnable() {
+        @Override public void run() {
+            statusRow.refresh();
+            if (progress > 0f) main.postDelayed(this, 5000);
+        }
+    };
+
     void refresh(boolean notifications) {
+        statusRow.refresh();
+        main.removeCallbacks(statusTick);
+        main.postDelayed(statusTick, 5000);
         final Context c = getContext();
         notifsDirty = true; // "5m ago" and friends are rebuilt fresh on every open
         expanded.clear();
@@ -1712,6 +1727,7 @@ final class ControlPanel extends FrameLayout {
         float h = card.getHeight() > 0 ? cardTravel() : getResources().getDisplayMetrics().heightPixels;
         card.setTranslationY(-(1f - progress) * h);
         scrim.setAlpha(progress);
+        statusRow.setAlpha(progress);
         // Clear all rises from the bottom as the panel comes down
         clearAll.setAlpha(progress * clearFade);
         clearAll.setTranslationY((1f - progress) * Ui.dp(getContext(), 48));
