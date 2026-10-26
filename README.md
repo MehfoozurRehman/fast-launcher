@@ -25,7 +25,7 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
 - **Notifications, from any app**: swipe down from the left side of the status bar. Tap one to open it,
   swipe it right to dismiss, swipe it left for Snooze (an hour) and the app's notification Settings,
   or Clear all. Several from one app share a card ("3 more from WhatsApp",
-  tap to expand, Clear for the lot); **Recently dismissed** brings back the last day's dismissed ones. Swipe sideways to move between notifications and controls;
+  tap to expand, Clear for the lot); **History** (a small link by the title) brings back the last day's dismissed ones. Swipe sideways to move between notifications and controls;
   a swipe from the screen edge (the back gesture) closes the panel. With the panel open, pulling down
   from the top again switches sides: the other page drops in from above, following your finger.
   Ongoing ones (USB mode, charging, downloads with their progress) are listed first and can be tapped

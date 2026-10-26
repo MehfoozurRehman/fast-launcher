@@ -248,6 +248,17 @@ final class ControlPanel extends FrameLayout {
         TextView ntitle = Ui.text(c, "Notifications", 17, Ui.FG, true);
         ntitle.setTypeface(Ui.font(c, 650));
         nhead.addView(ntitle, new LinearLayout.LayoutParams(0, -2, 1f));
+        // recently dismissed: a small, quiet link in the title row, not a bar in the list
+        historyButton = Ui.text(c, "History", 13, Ui.FG3, false);
+        historyButton.setPadding(Ui.dpi(c, 12), Ui.dpi(c, 8), Ui.dpi(c, 10), Ui.dpi(c, 8));
+        historyButton.setClickable(true);
+        Ui.pressable(historyButton);
+        historyButton.setOnClickListener(v -> {
+            historyOpen = !historyOpen;
+            buildHistory();
+            if (historyOpen) notifScroll.post(() -> notifScroll.smoothScrollTo(0, historyList.getTop()));
+        });
+        nhead.addView(historyButton);
         // Clear all lives at the bottom of the card (added below), within thumb's reach
         clearAll = Ui.text(c, "Clear all", 13.5f, Ui.FG, true);
         clearAll.setTypeface(Ui.font(c, 600));
@@ -270,13 +281,7 @@ final class ControlPanel extends FrameLayout {
         notifEmpty.setGravity(Gravity.CENTER);
         npage.addView(notifEmpty, Ui.lp(-1, Ui.dpi(c, 120)));
         // recently dismissed: a quiet button that opens the last day's dismissed notifications
-        historyButton = Ui.text(c, "", 13.5f, Ui.FG2, true);
-        historyButton.setGravity(Gravity.CENTER);
-        historyButton.setBackground(Ui.glass(TILE, Ui.dp(c, 20)));
-        historyButton.setClickable(true);
-        Ui.pressable(historyButton);
-        historyButton.setOnClickListener(v -> { historyOpen = !historyOpen; buildHistory(); });
-        npage.addView(historyButton, Ui.lp(-1, Ui.dpi(c, 40), Ui.dpi(c, 10)));
+        // (the history link lives in the title row above, quietly)
         historyList = new LinearLayout(c);
         historyList.setOrientation(LinearLayout.VERTICAL);
         npage.addView(historyList, Ui.lp(-1, -2, Ui.dpi(c, 8)));
@@ -1397,7 +1402,8 @@ final class ControlPanel extends FrameLayout {
         final Context c = getContext();
         List<NotifService.Gone> h = NotifService.history(c);
         historyButton.setVisibility(h.isEmpty() ? GONE : VISIBLE);
-        historyButton.setText(historyOpen ? "Hide recently dismissed" : "Recently dismissed (" + h.size() + ")");
+        historyButton.setText(historyOpen ? "Hide history" : "History");
+        historyButton.setTextColor(historyOpen ? Ui.ACCENT : Ui.FG3);
         historyList.removeAllViews();
         if (!historyOpen || h.isEmpty()) return;
         for (final NotifService.Gone g : h) {
