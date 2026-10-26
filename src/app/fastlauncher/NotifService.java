@@ -156,6 +156,12 @@ public class NotifService extends NotificationListenerService {
         if (s != null) try { s.cancelNotification(key); } catch (Exception ignored) {}
     }
 
+    /** Hide a notification for a while; the system brings it back afterwards. */
+    static void snooze(String key, long ms) {
+        NotifService s = running;
+        if (s != null) try { s.snoozeNotification(key, ms); } catch (Exception ignored) {}
+    }
+
     static void dismissAll() {
         NotifService s = running;
         if (s != null) try { s.cancelAllNotifications(); } catch (Exception ignored) {}

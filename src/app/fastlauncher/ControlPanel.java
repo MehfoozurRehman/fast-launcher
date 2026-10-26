@@ -260,6 +260,10 @@ final class ControlPanel extends FrameLayout {
         npage.addView(nhead, Ui.lp(-1, -2));
         notifList = new LinearLayout(c);
         notifList.setOrientation(LinearLayout.VERTICAL);
+        // a card swiped aside slides out past the list's margin instead of being cut square there
+        notifList.setClipChildren(false);
+        npage.setClipToPadding(false);
+        npage.setClipChildren(false);
         npage.addView(notifList, Ui.lp(-1, -2, Ui.dpi(c, 4)));
         notifEmpty = Ui.text(c, "No notifications", 14, Ui.FG2, false);
         notifEmpty.setGravity(Gravity.CENTER);
@@ -1176,6 +1180,7 @@ final class ControlPanel extends FrameLayout {
             btScroll.scrollTo(0, 0);
         }
         page = p;
+        resetPageLooks();
         scroll.setVisibility(p == CONTROLS ? VISIBLE : GONE);
         notifScroll.setVisibility(p == NOTIFS ? VISIBLE : GONE);
         btScroll.setVisibility(p == BT ? VISIBLE : GONE);
@@ -1264,6 +1269,7 @@ final class ControlPanel extends FrameLayout {
     private void buildNotifs() {
         notifsDirty = false;
         if (page == NOTIFS && progress > 0f) android.transition.TransitionManager.beginDelayedTransition(notifList, Ui.motion());
+        NotifRow.open = null;
         notifList.removeAllViews();
         List<android.service.notification.StatusBarNotification> all = NotifService.list;
         // ongoing ones stay single; the rest are gathered per app, in order of each app's newest
@@ -1464,7 +1470,14 @@ final class ControlPanel extends FrameLayout {
         row.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
         // ongoing ones (USB mode, charging, a download) stay put, like in the system shade
         row.dismissable = (n.flags & (android.app.Notification.FLAG_NO_CLEAR | android.app.Notification.FLAG_ONGOING_EVENT)) == 0;
-        return row;
+        FrameLayout holder = new FrameLayout(c);
+        holder.setTag(HOLDER);
+        holder.setClipChildren(false);
+        View acts = swipeActions(c, s, row);
+        holder.addView(acts, new LayoutParams(-2, -2, Gravity.END | Gravity.CENTER_VERTICAL));
+        holder.addView(row, new LayoutParams(-1, -2));
+        row.actions = acts;
+        return holder;
     }
 
     /**
@@ -1643,11 +1656,17 @@ final class ControlPanel extends FrameLayout {
     }
 
     /** A notification card: tap to open, swipe sideways to dismiss. */
+    /**
+     * A notification card. Tap opens it; swipe right dismisses; swipe left slides it aside to
+     * reveal its actions (Snooze, Settings) sitting behind it. One card open at a time.
+     */
     static final class NotifRow extends LinearLayout {
-        static boolean touching; // read by the panel: a right swipe here belongs to the card
+        static boolean touching; // read by the panel: sideways swipes here belong to the card
+        static NotifRow open;    // the card whose actions are showing
         boolean dismissable = true;
+        View actions;            // the buttons behind the card (set by the builder)
         private final Runnable onDismiss, onOpen;
-        private float downX, downY;
+        private float downX, downY, base;
         private boolean swiping, cancelled;
         private VelocityTracker vt;
         private final int slop;
@@ -1659,6 +1678,54 @@ final class ControlPanel extends FrameLayout {
             slop = ViewConfiguration.get(c).getScaledTouchSlop();
         }
 
+        private float reveal() { return actions == null ? 0 : actions.getWidth() + Ui.dp(getContext(), 10); }
+
+        /** Place the card at x (0 = closed, -reveal = actions showing) and fade the actions in with it. */
+        private void at(float x) {
+            setTranslationX(x);
+            if (actions != null) {
+                float f = reveal() <= 0 ? 0 : Math.min(1f, -x / reveal());
+                actions.setAlpha(Math.max(0f, f));
+                actions.setScaleX(0.85f + 0.15f * Math.max(0f, f));
+                actions.setScaleY(0.85f + 0.15f * Math.max(0f, f));
+            }
+        }
+
+        void close() {
+            if (open == this) open = null;
+            ValueAnimator va = ValueAnimator.ofFloat(getTranslationX(), 0f);
+            va.setDuration(200);
+            va.setInterpolator(Ui.EMPHASIZED);
+            va.addUpdateListener(a -> at((Float) a.getAnimatedValue()));
+            va.start();
+        }
+
+        private void showActions() {
+            if (open != null && open != this) open.close();
+            open = this;
+            ValueAnimator va = ValueAnimator.ofFloat(getTranslationX(), -reveal());
+            va.setDuration(220);
+            va.setInterpolator(Ui.EMPHASIZED);
+            va.addUpdateListener(a -> at((Float) a.getAnimatedValue()));
+            va.start();
+            performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+        }
+
+        /** Slide away and run the action once out of sight (dismiss, snooze). */
+        void leave(int direction, Runnable then) {
+            if (open == this) open = null;
+            if (actions != null) actions.animate().alpha(0f).setDuration(120).start();
+            animate().translationX(direction * getWidth()).alpha(0f).setDuration(170).withEndAction(() -> {
+                View self = getParent() instanceof FrameLayout && ((View) getParent()).getTag() == HOLDER ? (View) getParent() : this;
+                ViewGroup p = (ViewGroup) self.getParent();
+                if (p != null) {
+                    android.transition.TransitionManager.beginDelayedTransition(p, Ui.motion());
+                    p.removeView(self);
+                }
+                then.run();
+            }).start();
+        }
+
         @Override public boolean onTouchEvent(MotionEvent e) {
             if (vt == null) vt = VelocityTracker.obtain();
             vt.addMovement(e);
@@ -1666,19 +1733,28 @@ final class ControlPanel extends FrameLayout {
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     downX = e.getRawX(); downY = e.getRawY();
+                    base = getTranslationX();
                     swiping = false; cancelled = false;
                     touching = true;
+                    if (open != null && open != this) open.close();
                     animate().scaleX(0.98f).scaleY(0.98f).setDuration(90).start();
                     return true;
                 case MotionEvent.ACTION_MOVE:
-                    if (!swiping && !cancelled && dismissable && dx > slop && Math.abs(dx) > Math.abs(dy)) {
+                    if (!swiping && !cancelled && Math.abs(dx) > slop && Math.abs(dx) > Math.abs(dy)
+                            && (dx < 0 || base < 0 || dismissable)) {
                         swiping = true;
                         getParent().requestDisallowInterceptTouchEvent(true);
+                        downX = e.getRawX() - Math.signum(dx) * slop;
+                        dx = e.getRawX() - downX;
                     }
                     if (!swiping && Math.hypot(dx, dy) > slop) cancelled = true;
                     if (swiping) {
-                        setTranslationX(dx);
-                        setAlpha(1f - Math.min(1f, Math.abs(dx) / Math.max(1, getWidth())));
+                        float x = base + dx;
+                        float rv = reveal();
+                        if (x < -rv) x = -rv + (x + rv) * 0.3f;          // past the actions: resist
+                        if (x > 0 && (base < 0 || !dismissable)) x = x * 0.3f; // closing or can't dismiss
+                        if (x > 0) { setTranslationX(x); setAlpha(1f - Math.min(1f, x / Math.max(1, getWidth()))); }
+                        else { setAlpha(1f); at(x); }
                     }
                     return true;
                 case MotionEvent.ACTION_UP:
@@ -1689,22 +1765,20 @@ final class ControlPanel extends FrameLayout {
                     float vx = vt.getXVelocity();
                     vt.recycle();
                     vt = null;
+                    boolean up = e.getActionMasked() == MotionEvent.ACTION_UP;
                     if (swiping) {
-                        boolean out = Math.abs(dx) > getWidth() * 0.35f || (Math.abs(vx) > 1200 && Math.signum(vx) == Math.signum(dx));
-                        if (out && e.getActionMasked() == MotionEvent.ACTION_UP) {
-                            float to = Math.signum(dx == 0 ? vx : dx) * getWidth();
-                            animate().translationX(to).alpha(0f).setDuration(160).withEndAction(() -> {
-                                ViewGroup p = (ViewGroup) getParent();
-                                if (p != null) {
-                                    android.transition.TransitionManager.beginDelayedTransition(p, Ui.motion());
-                                    p.removeView(this);
-                                }
-                                onDismiss.run();
-                            }).start();
+                        float x = getTranslationX();
+                        if (x > 0) {
+                            boolean out = base >= 0 && dismissable && up
+                                    && (x > getWidth() * 0.35f || vx > 1200);
+                            if (out) leave(1, onDismiss);
+                            else { animate().translationX(0f).alpha(1f).setDuration(180).start(); if (open == this) open = null; }
                         } else {
-                            animate().translationX(0f).alpha(1f).setDuration(180).start();
+                            boolean show = up && actions != null && (x < -reveal() * 0.45f || vx < -900) && vx < 900;
+                            if (show) showActions(); else close();
                         }
-                    } else if (!cancelled && e.getActionMasked() == MotionEvent.ACTION_UP) {
+                    } else if (!cancelled && up) {
+                        if (getTranslationX() < 0) { close(); return true; } // tap on an open card closes it
                         performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
                         onOpen.run();
                     }
@@ -1713,6 +1787,48 @@ final class ControlPanel extends FrameLayout {
             }
             return true;
         }
+    }
+
+    static final Object HOLDER = new Object();
+
+    /** The buttons behind a card: Snooze (an hour) for normal ones, and the app's notification settings. */
+    private View swipeActions(final Context c, final android.service.notification.StatusBarNotification s, final NotifRow row) {
+        LinearLayout box = new LinearLayout(c);
+        box.setGravity(Gravity.CENTER_VERTICAL);
+        box.setPadding(0, 0, Ui.dpi(c, 4), 0);
+        boolean ongoing = (s.getNotification().flags & android.app.Notification.FLAG_ONGOING_EVENT) != 0;
+        if (!ongoing) box.addView(actionButton(c, PanelIcons.BELL_OFF, "Snooze", () -> {
+            row.leave(-1, () -> NotifService.snooze(s.getKey(), 60 * 60 * 1000L));
+        }));
+        box.addView(actionButton(c, PanelIcons.GEAR, "Settings", () -> {
+            Intent i = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, s.getPackageName());
+            String ch = s.getNotification().getChannelId();
+            if (ch != null) i = new Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, s.getPackageName()).putExtra(Settings.EXTRA_CHANNEL_ID, ch);
+            open(i);
+        }));
+        box.setAlpha(0f);
+        return box;
+    }
+
+    private View actionButton(Context c, int icon, String label, Runnable r) {
+        LinearLayout b = new LinearLayout(c);
+        b.setOrientation(LinearLayout.VERTICAL);
+        b.setGravity(Gravity.CENTER);
+        PanelIcons ic = new PanelIcons(c, icon, Ui.FG);
+        int p = Ui.dpi(c, 12);
+        ic.setPadding(p, p, p, p);
+        ic.setBackground(Ui.round(TILE, Ui.dp(c, 23)));
+        b.addView(ic, Ui.lp(Ui.dpi(c, 46), Ui.dpi(c, 46)));
+        TextView t = Ui.text(c, label, 11.5f, Ui.FG2, false);
+        b.addView(t, Ui.lp(-2, -2, Ui.dpi(c, 5)));
+        b.setClickable(true);
+        Ui.pressable(b);
+        b.setOnClickListener(v -> { v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY); r.run(); });
+        LinearLayout.LayoutParams lp = Ui.lp(Ui.dpi(c, 66), -2);
+        b.setLayoutParams(lp);
+        return b;
     }
 
     // ================================================================ motion
@@ -1800,9 +1916,14 @@ final class ControlPanel extends FrameLayout {
                 if (topPull && dy > slop && dy > Math.abs(dx)) {
                     topPulling = true;
                     int target = downX < getWidth() * 0.45f ? NOTIFS : CONTROLS;
-                    if (page != target && (pageAnim == null || !pageAnim.isRunning())) {
-                        slideTo(target);
-                        performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                    dropTo = page != target && (pageAnim == null || !pageAnim.isRunning()) ? target : -1;
+                    downY = e.getRawY() - slop; // follow from here, no jump
+                    if (dropTo >= 0) {
+                        View v = pageView(dropTo);
+                        if (dropTo == NOTIFS && notifsDirty) buildNotifs();
+                        v.setVisibility(VISIBLE);
+                        card.setLayerType(LAYER_TYPE_NONE, null);
+                        layDrop(0f);
                     }
                     return true;
                 }
@@ -1822,7 +1943,7 @@ final class ControlPanel extends FrameLayout {
                 }
                 // sideways: switch pages (a right swipe on a notification card dismisses it instead)
                 if (Math.abs(dx) > slop && Math.abs(dx) > Math.abs(dy) * 1.5f
-                        && !(NotifRow.touching && dx > 0) && (pageAnim == null || !pageAnim.isRunning())) {
+                        && !NotifRow.touching && (pageAnim == null || !pageAnim.isRunning())) {
                     paging = true;
                     pagingTo = -1;
                     downX = e.getRawX() - Math.signum(dx) * slop; // no jump of the slop distance
@@ -1835,11 +1956,82 @@ final class ControlPanel extends FrameLayout {
     }
 
     private boolean topPull, topPulling;
+    private int dropTo = -1;
+    private ValueAnimator dropAnim;
+
+    /**
+     * Pulling down from the other side while open: the page you're on fades and sinks a little,
+     * the other drops in from above, both following the finger (f = 0 nothing yet, 1 done).
+     */
+    private void layDrop(float f) {
+        float d = Ui.dp(getContext(), 1);
+        View from = pageView(page), to = pageView(dropTo);
+        float out = Math.min(1f, f * 1.6f); // the old page is mostly gone by the middle
+        from.setAlpha(1f - out);
+        from.setTranslationY(out * 28 * d);
+        from.setScaleX(1f - out * 0.04f);
+        from.setScaleY(1f - out * 0.04f);
+        float in = Math.max(0f, (f - 0.15f) / 0.85f);
+        to.setAlpha(in);
+        to.setTranslationY(-(1f - in) * 48 * d);
+        to.setScaleX(0.97f + in * 0.03f);
+        to.setScaleY(0.97f + in * 0.03f);
+        float a = page == NOTIFS ? 0f : 1f, b = dropTo == NOTIFS ? 0f : 1f;
+        dots.setPosition(a + (b - a) * f);
+        if (page == NOTIFS) { clearFade = 1f - out; clearAll.setAlpha(progress * clearFade); }
+        else if (dropTo == NOTIFS && hasNotifs) { // Clear all arrives with the notifications
+            if (clearAll.getVisibility() != VISIBLE) clearAll.setVisibility(VISIBLE);
+            clearFade = in;
+            clearAll.setAlpha(progress * clearFade);
+        }
+    }
+
+    private void settleDrop(float from, final boolean commit) {
+        if (dropAnim != null) dropAnim.cancel();
+        final int target = dropTo;
+        dropAnim = ValueAnimator.ofFloat(from, commit ? 1f : 0f);
+        dropAnim.setDuration(Math.round(160 + 140 * Math.abs((commit ? 1f : 0f) - from)));
+        dropAnim.setInterpolator(Ui.EMPHASIZED);
+        dropAnim.addUpdateListener(an -> { if (dropTo >= 0) layDrop((Float) an.getAnimatedValue()); });
+        dropAnim.addListener(new AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(Animator an) {
+                dropTo = -1;
+                resetPageLooks();
+                card.setLayerType(LAYER_TYPE_HARDWARE, null);
+                if (commit) {
+                    performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                    showPage(target);
+                } else {
+                    pageView(target).setVisibility(GONE);
+                    showPage(page);
+                }
+            }
+        });
+        dropAnim.start();
+    }
+
+    private void resetPageLooks() {
+        for (ScrollView v : new ScrollView[]{scroll, notifScroll, btScroll}) {
+            v.setAlpha(1f);
+            v.setTranslationY(0f);
+            v.setScaleX(1f);
+            v.setScaleY(1f);
+        }
+    }
 
     @Override public boolean onTouchEvent(MotionEvent e) {
         if (topPulling) { // the rest of a top pull is ours; it never closes the panel
+            if (vt != null) vt.addMovement(e);
             int a = e.getActionMasked();
-            if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) topPulling = false;
+            float f = Math.max(0f, Math.min(1f, (e.getRawY() - downY) / Ui.dp(getContext(), 220)));
+            if (a == MotionEvent.ACTION_MOVE) {
+                if (dropTo >= 0) layDrop(f);
+            } else if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) {
+                topPulling = false;
+                float vy = 0;
+                if (vt != null) { vt.computeCurrentVelocity(1000); vy = vt.getYVelocity(); vt.recycle(); vt = null; }
+                if (dropTo >= 0) settleDrop(f, a == MotionEvent.ACTION_UP && (f > 0.35f || vy > 900));
+            }
             return true;
         }
         if (paging) {

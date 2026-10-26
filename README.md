@@ -23,9 +23,11 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
 - **Swipe down on home** opens the notifications page; **double-tap** empty space to lock the phone.
 - **Under the date**: the next alarm and calendar event when they fall within the coming day.
 - **Notifications, from any app**: swipe down from the left side of the status bar. Tap one to open it,
-  swipe it right to dismiss, or Clear all. Several from one app share a card ("3 more from WhatsApp",
+  swipe it right to dismiss, swipe it left for Snooze (an hour) and the app's notification Settings,
+  or Clear all. Several from one app share a card ("3 more from WhatsApp",
   tap to expand, Clear for the lot); **Recently dismissed** brings back the last day's dismissed ones. Swipe sideways to move between notifications and controls;
-  a swipe from the screen edge (the back gesture) closes the panel.
+  a swipe from the screen edge (the back gesture) closes the panel. With the panel open, pulling down
+  from the top again switches sides: the other page drops in from above, following your finger.
   Ongoing ones (USB mode, charging, downloads with their progress) are listed first and can be tapped
   but not dismissed. Notification buttons work (Reply opens a reply field in the card, Mark as read
   and the like act without closing the panel). **Original** in the panel's top bar opens the
