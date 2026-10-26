@@ -1787,6 +1787,9 @@ final class ControlPanel extends FrameLayout {
                 downX = e.getRawX(); downY = e.getRawY(); dragging = false;
                 float edge = Ui.dp(getContext(), 24);
                 fromEdge = downX < edge || downX > getWidth() - edge;
+                // a pull from the status bar area while open: switch pages, like a pull when closed
+                topPull = downY < host.statusBarHeight() + Ui.dp(getContext(), 16);
+                topPulling = false;
                 if (vt != null) vt.recycle();
                 vt = VelocityTracker.obtain();
                 vt.addMovement(e);
@@ -1794,6 +1797,15 @@ final class ControlPanel extends FrameLayout {
             case MotionEvent.ACTION_MOVE:
                 if (vt != null) vt.addMovement(e);
                 float dy = e.getRawY() - downY, dx = e.getRawX() - downX;
+                if (topPull && dy > slop && dy > Math.abs(dx)) {
+                    topPulling = true;
+                    int target = downX < getWidth() * 0.45f ? NOTIFS : CONTROLS;
+                    if (page != target && (pageAnim == null || !pageAnim.isRunning())) {
+                        slideTo(target);
+                        performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                    }
+                    return true;
+                }
                 if (dy < -slop && Math.abs(dy) > Math.abs(dx) && !pageScroll().canScrollVertically(1)) {
                     dragging = true;
                     downY = e.getRawY();
@@ -1822,7 +1834,14 @@ final class ControlPanel extends FrameLayout {
         return false;
     }
 
+    private boolean topPull, topPulling;
+
     @Override public boolean onTouchEvent(MotionEvent e) {
+        if (topPulling) { // the rest of a top pull is ours; it never closes the panel
+            int a = e.getActionMasked();
+            if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) topPulling = false;
+            return true;
+        }
         if (paging) {
             if (vt != null) vt.addMovement(e);
             float dx = e.getRawX() - downX;
