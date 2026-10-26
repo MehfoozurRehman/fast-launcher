@@ -164,7 +164,7 @@ final class ControlPanel extends FrameLayout {
         int m = Ui.dpi(c, 8);
         clp.leftMargin = clp.rightMargin = m;
         clp.topMargin = h.statusBarHeight() + Ui.dpi(c, 6);
-        clp.bottomMargin = Ui.dpi(c, 24); // a floating card, never running off the screen
+        clp.bottomMargin = Ui.dpi(c, 56); // a floating card, never running off the screen (set exactly below)
         addView(card, clp);
         // our window covers the real status bar, so the panel carries its own copy of it
         statusRow = new StatusRow(c);
@@ -256,7 +256,7 @@ final class ControlPanel extends FrameLayout {
         clearAll.setBackground(Ui.glass(TILE, Ui.dp(c, 20)));
         clearAll.setClickable(true);
         Ui.pressable(clearAll);
-        clearAll.setOnClickListener(v -> { NotifService.dismissAll(); slideTo(CONTROLS); });
+        clearAll.setOnClickListener(v -> clearAllNotifications());
         clearAll.setVisibility(GONE);
         npage.addView(nhead, Ui.lp(-1, -2));
         notifList = new LinearLayout(c);
@@ -500,16 +500,18 @@ final class ControlPanel extends FrameLayout {
         int nav = 0;
         int navId = getResources().getIdentifier("navigation_bar_height", "dimen", "android");
         if (navId > 0) nav = getResources().getDimensionPixelSize(navId);
-        clearReserve = nav + Ui.dpi(c, 28 + 40 + 12); // the list stops above it
+        // bottom of the screen, from the edge up: page dots, then Clear all, then the card
+        dotsReserve = nav + Ui.dpi(c, 14 + 6 + 14);       // the card always stops above the dots
+        clearReserve = dotsReserve + Ui.dpi(c, 40 + 12);  // and above Clear all when it shows
         LayoutParams cap = new LayoutParams(-2, Ui.dpi(c, 40), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-        cap.bottomMargin = nav + Ui.dpi(c, 28);
+        cap.bottomMargin = dotsReserve;
         addView(clearAll, cap);
 
+        // the page dots stay in one place near the bottom edge whatever the page's height
         dots = new Dots(c);
-        View handle = dots;
-        LinearLayout.LayoutParams hp = Ui.lp(Ui.dpi(c, 60), Ui.dpi(c, 6), Ui.dpi(c, 12));
-        hp.gravity = Gravity.CENTER_HORIZONTAL;
-        card.addView(handle, hp);
+        LayoutParams dp = new LayoutParams(Ui.dpi(c, 60), Ui.dpi(c, 6), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        dp.bottomMargin = nav + Ui.dpi(c, 14);
+        addView(dots, dp);
 
         // The card stays a GPU layer: refreshed content is re-rendered into it while the window
         // is still invisible, and every visible frame of a pull is just a translated texture.
@@ -1189,6 +1191,35 @@ final class ControlPanel extends FrameLayout {
     }
 
     private boolean hasNotifs;
+    private int dotsReserve;
+
+    /**
+     * Clear all: the cards that can go sweep off one after another, then everything clearable is
+     * dismissed. You stay on the notifications page (ongoing ones like USB mode remain).
+     */
+    private void clearAllNotifications() {
+        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        int n = notifList.getChildCount(), delay = 0;
+        float w = notifList.getWidth();
+        for (int i = 0; i < n; i++) {
+            View v = notifList.getChildAt(i);
+            if (!clearable(v)) continue;
+            v.animate().translationX(w).alpha(0f).setStartDelay(delay).setDuration(200)
+                    .setInterpolator(Ui.EMPHASIZED).start();
+            delay += 35;
+        }
+        main.postDelayed(NotifService::dismissAll, delay + 180);
+    }
+
+    /** A card (or a group of them) that Clear all removes: not an ongoing one. */
+    private static boolean clearable(View v) {
+        if (v instanceof NotifRow) return ((NotifRow) v).dismissable;
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) if (clearable(g.getChildAt(i))) return true;
+        }
+        return false;
+    }
     private int clearReserve;
     private float clearFade = 1f; // fades while the notifications page slides away
 
@@ -1201,7 +1232,7 @@ final class ControlPanel extends FrameLayout {
         clearAll.setAlpha(progress * clearFade);
         // the card (and its list) stops above the button, so nothing hides behind it
         LayoutParams lp = (LayoutParams) card.getLayoutParams();
-        int bottom = on ? clearReserve : Ui.dpi(getContext(), 24);
+        int bottom = on ? clearReserve : dotsReserve;
         if (lp.bottomMargin != bottom) { lp.bottomMargin = bottom; card.setLayoutParams(lp); }
     }
 
@@ -1297,7 +1328,10 @@ final class ControlPanel extends FrameLayout {
         }
         boolean any = notifList.getChildCount() > 0;
         notifEmpty.setVisibility(any ? GONE : VISIBLE);
-        hasNotifs = any;
+        // Clear all only when there's something it can clear (ongoing ones like USB mode stay)
+        boolean clearableAny = false;
+        for (int i = 0; i < notifList.getChildCount(); i++) if (clearable(notifList.getChildAt(i))) clearableAny = true;
+        hasNotifs = clearableAny;
         updateClearAll();
         buildHistory();
     }
@@ -1847,6 +1881,8 @@ final class ControlPanel extends FrameLayout {
         // Clear all rises from the bottom as the panel comes down
         clearAll.setAlpha(progress * clearFade);
         clearAll.setTranslationY((1f - progress) * Ui.dp(getContext(), 48));
+        dots.setAlpha(progress);
+        dots.setTranslationY((1f - progress) * Ui.dp(getContext(), 24));
     }
 
     /** Follow a pull from the status bar: dy is how far the finger has come down. */
