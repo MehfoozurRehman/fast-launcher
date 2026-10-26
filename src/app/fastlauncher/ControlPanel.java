@@ -1891,6 +1891,31 @@ final class ControlPanel extends FrameLayout {
         boolean was = progress > 0f;
         setProgress(dy / cardTravel());
         if (!was && progress > 0f && controller != null) tickProgress.run();
+        armWatchdog();
+    }
+
+    /**
+     * Safety net for a gesture that never ends (the touch stream cut off without a release: the
+     * screen went off, a window changed mid-pull, the system took the touch): if nothing has moved
+     * the panel for a moment and it's left half open, or a page change is left half done, finish it.
+     */
+    private final Runnable watchdog = this::checkStuck;
+
+    private void checkStuck() {
+        boolean animating = (anim != null && anim.isRunning())
+                || (dropAnim != null && dropAnim.isRunning()) || (pageAnim != null && pageAnim.isRunning());
+        if (animating || dragging || paging) return;
+        if (dropTo >= 0 && !topPulling) settleDrop(0f, false);
+        if (progress > 0f && progress < 1f && !reopening) settle(0f);
+    }
+
+    /** A finger is on the status-bar strip (set by PanelService): a still finger sends no events. */
+    boolean fingerDown;
+
+    void armWatchdog() {
+        main.removeCallbacks(watchdog);
+        // a finger resting mid-pull is fine; only a gesture that's truly gone quiet is finished
+        main.postDelayed(watchdog, fingerDown ? 4000 : 700);
     }
 
     void settle(float velocity) {
@@ -2104,6 +2129,7 @@ final class ControlPanel extends FrameLayout {
             }
             return true;
         }
+        armWatchdog();
         if (topPulling) { // the rest of a top pull is ours; it never closes the panel
             if (vt != null) vt.addMovement(e);
             int a = e.getActionMasked();

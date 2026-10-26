@@ -332,6 +332,35 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         });
     }
 
+    /**
+     * Coming back from an app: the home screen must be showing and drawn. A transition cut off
+     * while we were in the background (an app opened mid-animation, or killed mid-way) could leave
+     * home faded, scaled or stuck on a stale GPU layer, showing only the wallpaper until a touch.
+     */
+    private void settleHome() {
+        if (root == null) return;
+        float p = root.progress;
+        if (p > 0f && p < 1f) root.snapTo(p >= 0.5f ? 1f : 0f);   // never left half way
+        else root.snapTo(p);                                       // re-applies looks, drops layers
+        if (root.progress == 0f) {
+            home.setVisibility(View.VISIBLE);
+            home.setAlpha(1f);
+            home.setScaleX(1f);
+            home.setScaleY(1f);
+            home.setTranslationY(0f);
+        }
+        home.setLayerType(View.LAYER_TYPE_NONE, null);
+        root.invalidate();
+        home.invalidate();
+        dock.invalidate();
+        grid.invalidate();
+    }
+
+    @Override public void onWindowFocusChanged(boolean focus) {
+        super.onWindowFocusChanged(focus);
+        if (focus) settleHome();
+    }
+
     private final NotifService.Changed notifChanged = this::pushBadges;
 
     private void pushBadges() {
@@ -344,6 +373,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         // a light/dark switch that happened while we were in the background
         Ui.theme(this);
         if (builtDark != Ui.dark || builtAccent != Ui.ACCENT) { recreate(); return; }
+        settleHome();
         NotifService.listener = notifChanged;
         // put the panel's service back if a phone cleaner force-stopped us (Android turns it off)
         final Context appCtx = getApplicationContext();
@@ -1546,7 +1576,8 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         }
 
         private void endLayers() {
-            if (!homeLayered || dragging || (anim != null && anim.isRunning())) return;
+            if (!homeLayered || (anim != null && anim.isRunning())) return;
+            if (dragging && hasWindowFocus()) return;
             homeLayered = false;
             home.setLayerType(View.LAYER_TYPE_NONE, null);
         }

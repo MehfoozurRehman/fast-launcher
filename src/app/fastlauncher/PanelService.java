@@ -381,6 +381,7 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
                 case MotionEvent.ACTION_DOWN:
                     downY = e.getRawY();
                     pulling = false;
+                    if (panel != null) panel.fingerDown = true;
                     // read every control's state now, while the finger hasn't moved yet: this
                     // frame draws nothing visible, so the panel's first visible frame is cheap
                     ensurePanel();
@@ -403,6 +404,7 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
                 }
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
+                    panel.fingerDown = false;
                     if (pulling) {
                         vt.computeCurrentVelocity(1000);
                         panel.settle(vt.getYVelocity());
