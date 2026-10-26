@@ -994,13 +994,15 @@ final class ControlPanel extends FrameLayout {
                 if (fallback != null) open(fallback);
                 else if ("Bluetooth".equals(label)) requestBt(!btOn());
             }
-            // read the real state back once the system has acted (and once more for slow ones)
-            main.postDelayed(this::refreshStates, 500);
-            main.postDelayed(this::refreshStates, 1600);
+            // read the real state back as the system acts; a reading that still disagrees with the
+            // tap is ignored until HOLD_MS, then the last one shows the truth (e.g. a failed switch)
+            for (long t : new long[]{400, 900, 1600, HOLD_MS + 100}) main.postDelayed(this::refreshStates, t);
         });
     }
 
     /** Re-read every control's state without disturbing the page or scroll position. */
+    static final long HOLD_MS = 2600;
+
     private void refreshStates() {
         if (progress <= 0f) return;
         int y = scroll.getScrollY();
@@ -1910,12 +1912,16 @@ final class ControlPanel extends FrameLayout {
 
         private Boolean shown;
 
+        long holdUntil;
+
         void flip() {
             boolean on = shown == null || !shown;
             set(on, on ? "Turning on\u2026" : "Turning off\u2026");
+            holdUntil = SystemClock.uptimeMillis() + HOLD_MS;
         }
 
         void set(boolean on, String s) {
+            if (shown != null && shown != on && SystemClock.uptimeMillis() < holdUntil) return;
             if (shown != null && shown == on) { setIfChanged(state, s); return; }
             shown = on;
             Context c = getContext();
@@ -1955,9 +1961,16 @@ final class ControlPanel extends FrameLayout {
 
         private Boolean shown;
 
-        void flip() { setActive(shown == null || !shown); }
+        /** Until this time a reading that contradicts the tap is the phone not having caught up. */
+        long holdUntil;
+
+        void flip() {
+            setActive(shown == null || !shown);
+            holdUntil = SystemClock.uptimeMillis() + HOLD_MS;
+        }
 
         void setActive(boolean on) {
+            if (shown != null && shown != on && SystemClock.uptimeMillis() < holdUntil) return;
             if (shown != null && shown == on) return;
             shown = on;
             icon.setBackground(Ui.round(on ? Ui.ACCENT : ROUND, Ui.dp(getContext(), 27)));
