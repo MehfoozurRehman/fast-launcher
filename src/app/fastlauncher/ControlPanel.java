@@ -242,15 +242,15 @@ final class ControlPanel extends FrameLayout {
         TextView ntitle = Ui.text(c, "Notifications", 17, Ui.FG, true);
         ntitle.setTypeface(Ui.font(c, 650));
         nhead.addView(ntitle, new LinearLayout.LayoutParams(0, -2, 1f));
-        clearAll = Ui.text(c, "Clear all", 13.5f, Ui.FG, true);
+        // Clear all lives at the bottom of the card (added below), within thumb's reach
+        clearAll = Ui.text(c, "Clear all", 14.5f, Ui.FG, true);
         clearAll.setTypeface(Ui.font(c, 600));
         clearAll.setGravity(Gravity.CENTER);
-        clearAll.setPadding(Ui.dpi(c, 16), 0, Ui.dpi(c, 16), 0);
-        clearAll.setBackground(Ui.round(TILE, Ui.dp(c, 18)));
+        clearAll.setBackground(Ui.round(TILE, Ui.dp(c, 23)));
         clearAll.setClickable(true);
         Ui.pressable(clearAll);
         clearAll.setOnClickListener(v -> { NotifService.dismissAll(); slideTo(CONTROLS); });
-        nhead.addView(clearAll, Ui.lp(-2, Ui.dpi(c, 36)));
+        clearAll.setVisibility(GONE);
         npage.addView(nhead, Ui.lp(-1, -2));
         notifList = new LinearLayout(c);
         notifList.setOrientation(LinearLayout.VERTICAL);
@@ -479,6 +479,11 @@ final class ControlPanel extends FrameLayout {
         recorder.setOnClickListener(v -> openApp("com.hihonor.soundrecorder", "com.google.android.apps.recorder"));
         lock.setOnClickListener(v -> closeThen(250, () -> host.globalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)));
         power.setOnClickListener(v -> closeThen(200, () -> host.globalAction(AccessibilityService.GLOBAL_ACTION_POWER_DIALOG)));
+
+        // outside the scrolling list, so it's always at the bottom however many notifications there are
+        LinearLayout.LayoutParams cap = Ui.lp(-1, Ui.dpi(c, 46), Ui.dpi(c, 10));
+        cap.leftMargin = cap.rightMargin = Ui.dpi(c, 12);
+        card.addView(clearAll, cap);
 
         dots = new Dots(c);
         View handle = dots;
@@ -1113,6 +1118,16 @@ final class ControlPanel extends FrameLayout {
         notifScroll.setVisibility(p == NOTIFS ? VISIBLE : GONE);
         btScroll.setVisibility(p == BT ? VISIBLE : GONE);
         dots.setPosition(p == NOTIFS ? 0f : 1f);
+        updateClearAll();
+    }
+
+    private boolean hasNotifs;
+
+    /** Clear all: on the notifications page when there's something to clear, else out of the way. */
+    private void updateClearAll() {
+        int vis = page == NOTIFS && hasNotifs ? VISIBLE : GONE;
+        if (clearAll.getVisibility() != vis) clearAll.setVisibility(vis);
+        clearAll.setAlpha(1f);
     }
 
     // ---------------------------------------------------------------- swiping between pages
@@ -1143,6 +1158,7 @@ final class ControlPanel extends FrameLayout {
             float f = Math.min(1f, Math.abs(offset) / w);
             float a = from == NOTIFS ? 0f : 1f, b = to == NOTIFS ? 0f : 1f;
             dots.setPosition(a + (b - a) * f);
+            if (from == NOTIFS) clearAll.setAlpha(1f - f); // fades as the notifications slide away
         }
     }
 
@@ -1205,7 +1221,8 @@ final class ControlPanel extends FrameLayout {
         }
         boolean any = notifList.getChildCount() > 0;
         notifEmpty.setVisibility(any ? GONE : VISIBLE);
-        clearAll.setVisibility(any ? VISIBLE : INVISIBLE);
+        hasNotifs = any;
+        updateClearAll();
         buildHistory();
     }
 
