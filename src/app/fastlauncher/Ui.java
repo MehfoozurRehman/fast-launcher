@@ -170,7 +170,7 @@ final class Ui {
     static LinearLayout group(Context c) {
         LinearLayout g = new LinearLayout(c);
         g.setOrientation(LinearLayout.VERTICAL);
-        g.setBackground(round(GROUP, dp(c, 22)));
+        g.setBackground(glass(GROUP, dp(c, 22)));
         int p = dpi(c, 16);
         g.setPadding(p, p, p, p);
         return g;
@@ -295,14 +295,26 @@ final class Ui {
      * Frosted glass for launcher cards: the blurred wallpaper that sits behind the card, lined
      * up with the screen, under a light tint. Falls back to a plain card colour without a blur.
      */
+    /**
+     * Liquid-glass card: the blurred wallpaper under it, a touch magnified (a lens) and more
+     * saturated (colour glows through), a light tint, a soft sheen at the top and a thin bright rim
+     * that catches the light along the top edge. Everything is drawn in one pass, no extra layers.
+     */
     static android.graphics.drawable.Drawable frost(final View owner, final float radius) {
-        final int tint = dark ? 0x66000000 : 0xB8F5F6F8;
+        final int tint = dark ? 0x52000000 : 0xA3F5F6F8;
         return new android.graphics.drawable.Drawable() {
             private final Paint bmp = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
             private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
             private final android.graphics.Path clip = new android.graphics.Path();
             private final Matrix m = new Matrix();
             private final int[] loc = new int[2];
+            private final Rim rim = new Rim(radius, owner.getResources().getDisplayMetrics().density);
+            {
+                // vibrancy: the colour of what's behind comes through brighter
+                android.graphics.ColorMatrix cm = new android.graphics.ColorMatrix();
+                cm.setSaturation(1.45f);
+                bmp.setColorFilter(new android.graphics.ColorMatrixColorFilter(cm));
+            }
 
             @Override public void draw(Canvas c) {
                 android.graphics.Rect b = getBounds();
@@ -312,6 +324,7 @@ final class Ui {
                 if (src == null) {
                     fill.setColor(CARD);
                     c.drawPath(clip, fill);
+                    rim.draw(c, b);
                     return;
                 }
                 int save = c.save();
@@ -330,10 +343,13 @@ final class Ui {
                 float s = Math.max(dm.widthPixels / (float) src.getWidth(), dm.heightPixels / (float) src.getHeight());
                 m.setScale(s, s);
                 m.postTranslate(-x, -y);
+                // the lens: magnify about the card's centre a little
+                m.postScale(1.06f, 1.06f, b.exactCenterX(), b.exactCenterY());
                 c.drawBitmap(src, m, bmp);
                 fill.setColor(tint);
                 c.drawRect(b, fill);
                 c.restoreToCount(save);
+                rim.draw(c, b);
             }
 
             @Override public void getOutline(android.graphics.Outline o) {
@@ -341,6 +357,66 @@ final class Ui {
             }
 
             @Override public void setAlpha(int a) { bmp.setAlpha(a); fill.setAlpha(a); }
+            @Override public void setColorFilter(android.graphics.ColorFilter cf) {}
+            @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
+        };
+    }
+
+    /** The light on a piece of glass: a sheen across the top and a rim bright at the top edge. */
+    static final class Rim {
+        private final float radius, d;
+        private final Paint sheen = new Paint(Paint.ANTI_ALIAS_FLAG), edge = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF r = new RectF();
+        private int forH = -1;
+
+        Rim(float radius, float density) {
+            this.radius = radius;
+            this.d = density;
+            edge.setStyle(Paint.Style.STROKE);
+            edge.setStrokeWidth(0.9f * density);
+        }
+
+        void draw(Canvas c, android.graphics.Rect b) {
+            if (b.height() != forH) {
+                forH = b.height();
+                // no outline: just light caught along the top edge, gone a short way down
+                float k = dark ? 1f : 1.2f;
+                float fade = Math.min(1f, 28 * d / Math.max(1, b.height()));
+                edge.setShader(new android.graphics.LinearGradient(0, b.top, 0, b.bottom,
+                        new int[]{alpha(0x3D, k), alpha(0x00, k), alpha(0x00, k)},
+                        new float[]{0f, fade, 1f}, Shader.TileMode.CLAMP));
+                sheen.setShader(new android.graphics.LinearGradient(0, b.top, 0, b.top + Math.min(b.height(), 90 * d),
+                        alpha(dark ? 0x12 : 0x30, 1f), 0x00FFFFFF, Shader.TileMode.CLAMP));
+            }
+            r.set(b);
+            c.drawRoundRect(r, radius, radius, sheen);
+            float h = edge.getStrokeWidth() / 2f;
+            r.inset(h, h);
+            c.drawRoundRect(r, radius - h, radius - h, edge);
+        }
+
+        private static int alpha(int a, float k) { return (Math.min(255, Math.round(a * k)) << 24) | 0xFFFFFF; }
+    }
+
+    /** A glass tile (panel buttons, groups): its colour plus the same light on its edge. */
+    static android.graphics.drawable.Drawable glass(int color, final float radius) {
+        final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        fill.setColor(color);
+        return new android.graphics.drawable.Drawable() {
+            private Rim rim;
+            private final RectF r = new RectF();
+
+            @Override public void draw(Canvas c) {
+                android.graphics.Rect b = getBounds();
+                float rad = Math.min(radius, Math.min(b.width(), b.height()) / 2f);
+                if (rim == null) rim = new Rim(rad, android.content.res.Resources.getSystem().getDisplayMetrics().density);
+                r.set(b);
+                c.drawRoundRect(r, rad, rad, fill);
+                if (Math.abs(b.width() - b.height()) > 2) rim.draw(c, b); // circles stay plain
+            }
+
+            @Override public void getOutline(android.graphics.Outline o) { o.setRoundRect(getBounds(), radius); }
+            @Override public void setAlpha(int a) { fill.setAlpha(a); }
             @Override public void setColorFilter(android.graphics.ColorFilter cf) {}
             @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
         };

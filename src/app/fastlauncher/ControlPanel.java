@@ -186,7 +186,7 @@ final class ControlPanel extends FrameLayout {
         notifButton = new LinearLayout(c);
         notifButton.setGravity(Gravity.CENTER_VERTICAL);
         notifButton.setPadding(Ui.dpi(c, 11), 0, Ui.dpi(c, 14), 0);
-        notifButton.setBackground(Ui.round(TILE, Ui.dp(c, 22)));
+        notifButton.setBackground(Ui.glass(TILE, Ui.dp(c, 22)));
         notifBell = new PanelIcons(c, PanelIcons.BELL, Ui.FG);
         notifButton.addView(notifBell, Ui.lp(Ui.dpi(c, 22), Ui.dpi(c, 22)));
         notifCount = Ui.text(c, "", 14, Ui.FG, true);
@@ -205,7 +205,7 @@ final class ControlPanel extends FrameLayout {
         original.setTypeface(Ui.font(c, 600));
         original.setGravity(Gravity.CENTER);
         original.setPadding(Ui.dpi(c, 16), 0, Ui.dpi(c, 16), 0);
-        original.setBackground(Ui.round(TILE, Ui.dp(c, 22)));
+        original.setBackground(Ui.glass(TILE, Ui.dp(c, 22)));
         original.setClickable(true);
         Ui.pressable(original);
         original.setOnClickListener(v -> {
@@ -253,7 +253,7 @@ final class ControlPanel extends FrameLayout {
         clearAll.setTypeface(Ui.font(c, 600));
         clearAll.setGravity(Gravity.CENTER);
         clearAll.setPadding(Ui.dpi(c, 22), 0, Ui.dpi(c, 22), 0);
-        clearAll.setBackground(Ui.round(TILE, Ui.dp(c, 20)));
+        clearAll.setBackground(Ui.glass(TILE, Ui.dp(c, 20)));
         clearAll.setClickable(true);
         Ui.pressable(clearAll);
         clearAll.setOnClickListener(v -> { NotifService.dismissAll(); slideTo(CONTROLS); });
@@ -272,7 +272,7 @@ final class ControlPanel extends FrameLayout {
         // recently dismissed: a quiet button that opens the last day's dismissed notifications
         historyButton = Ui.text(c, "", 13.5f, Ui.FG2, true);
         historyButton.setGravity(Gravity.CENTER);
-        historyButton.setBackground(Ui.round(TILE, Ui.dp(c, 20)));
+        historyButton.setBackground(Ui.glass(TILE, Ui.dp(c, 20)));
         historyButton.setClickable(true);
         Ui.pressable(historyButton);
         historyButton.setOnClickListener(v -> { historyOpen = !historyOpen; buildHistory(); });
@@ -297,7 +297,7 @@ final class ControlPanel extends FrameLayout {
         TextView back = Ui.text(c, "\u2039", 26, Ui.FG, false);
         back.setGravity(Gravity.CENTER);
         back.setPadding(0, 0, 0, Ui.dpi(c, 3));
-        back.setBackground(Ui.round(TILE, Ui.dp(c, 18)));
+        back.setBackground(Ui.glass(TILE, Ui.dp(c, 18)));
         back.setClickable(true);
         Ui.pressable(back);
         back.setOnClickListener(v -> slideTo(CONTROLS));
@@ -349,7 +349,7 @@ final class ControlPanel extends FrameLayout {
         mediaRow.addView(media, new LinearLayout.LayoutParams(0, -1, 2f));
 
         mediaFull = new FrameLayout(c);
-        mediaFull.setBackground(Ui.round(TILE, Ui.dp(c, 24)));
+        mediaFull.setBackground(Ui.glass(TILE, Ui.dp(c, 24)));
         mediaFull.setClipToOutline(true);
         mediaArt = new ImageView(c);
         mediaArt.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -413,12 +413,12 @@ final class ControlPanel extends FrameLayout {
         mediaEmpty = new LinearLayout(c);
         mediaEmpty.setOrientation(LinearLayout.VERTICAL);
         mediaEmpty.setGravity(Gravity.CENTER);
-        mediaEmpty.setBackground(Ui.round(TILE, Ui.dp(c, 24)));
+        mediaEmpty.setBackground(Ui.glass(TILE, Ui.dp(c, 24)));
         mediaEmpty.setPadding(Ui.dpi(c, 14), 0, Ui.dpi(c, 14), 0);
         PanelIcons note = new PanelIcons(c, PanelIcons.PLAY, Ui.FG2);
         int np = Ui.dpi(c, 13);
         note.setPadding(np, np, np, np);
-        note.setBackground(Ui.round(ROUND, Ui.dp(c, 23)));
+        note.setBackground(Ui.glass(ROUND, Ui.dp(c, 23)));
         mediaEmpty.addView(note, Ui.lp(Ui.dpi(c, 46), Ui.dpi(c, 46)));
         TextView e1 = Ui.text(c, "Nothing playing", 14, Ui.FG, true);
         e1.setTypeface(Ui.font(c, 600));
@@ -463,7 +463,7 @@ final class ControlPanel extends FrameLayout {
         power = new Round(c, PanelIcons.POWER, "Power");
         // long-press any of them and drag to rearrange; the order is remembered
         RoundGrid grid = new RoundGrid(c, Ui.dpi(c, 10));
-        grid.setBackground(Ui.round(TILE, Ui.dp(c, 24)));
+        grid.setBackground(Ui.glass(TILE, Ui.dp(c, 24)));
         grid.setPadding(Ui.dpi(c, 4), Ui.dpi(c, 14), Ui.dpi(c, 4), Ui.dpi(c, 12));
         final android.content.SharedPreferences prefs = c.getSharedPreferences("panel", Context.MODE_PRIVATE);
         grid.setRounds(java.util.Arrays.asList(hotspot, rotate, plane, location, dark, dnd, sound, eye,
@@ -536,7 +536,7 @@ final class ControlPanel extends FrameLayout {
 
     private PanelIcons circleButton(Context c, int type, Runnable action) {
         PanelIcons b = new PanelIcons(c, type, Ui.FG);
-        b.setBackground(Ui.round(TILE, Ui.dp(c, 22)));
+        b.setBackground(Ui.glass(TILE, Ui.dp(c, 22)));
         int p = Ui.dpi(c, 11);
         b.setPadding(p, p, p, p);
         b.setClickable(true);
@@ -1063,7 +1063,7 @@ final class ControlPanel extends FrameLayout {
         boolean on = btOn();
         btToggle.setText(on ? "On" : "Off");
         btToggle.setTextColor(on ? Color.WHITE : Ui.FG);
-        btToggle.setBackground(Ui.round(on ? Ui.ACCENT : TILE, Ui.dp(c, 18)));
+        btToggle.setBackground(Ui.glass(on ? Ui.ACCENT : TILE, Ui.dp(c, 18)));
         btList.removeAllViews();
         if (!on) { btList.addView(btMessage(c, "Bluetooth is off")); return; }
         java.util.List<android.bluetooth.BluetoothDevice> devices = new java.util.ArrayList<>();
@@ -1085,13 +1085,13 @@ final class ControlPanel extends FrameLayout {
             boolean connected = btConnected.contains(d.getAddress());
             LinearLayout r = new LinearLayout(c);
             r.setGravity(Gravity.CENTER_VERTICAL);
-            r.setBackground(Ui.round(TILE, Ui.dp(c, 22)));
+            r.setBackground(Ui.glass(TILE, Ui.dp(c, 22)));
             int p = Ui.dpi(c, 10);
             r.setPadding(p, p, Ui.dpi(c, 16), p);
             PanelIcons icon = new PanelIcons(c, btAudio(d) ? PanelIcons.SPEAKER : PanelIcons.BLUETOOTH, connected ? Color.WHITE : Ui.FG);
             int ip = Ui.dpi(c, 11);
             icon.setPadding(ip, ip, ip, ip);
-            icon.setBackground(Ui.round(connected ? Ui.ACCENT : ROUND, Ui.dp(c, 22)));
+            icon.setBackground(Ui.glass(connected ? Ui.ACCENT : ROUND, Ui.dp(c, 22)));
             r.addView(icon, Ui.lp(Ui.dpi(c, 44), Ui.dpi(c, 44)));
             LinearLayout col = new LinearLayout(c);
             col.setOrientation(LinearLayout.VERTICAL);
@@ -1141,7 +1141,7 @@ final class ControlPanel extends FrameLayout {
         TextView t = Ui.text(c, label, 14, Ui.FG, true);
         t.setTypeface(Ui.font(c, 600));
         t.setGravity(Gravity.CENTER);
-        t.setBackground(Ui.round(TILE, Ui.dp(c, 22)));
+        t.setBackground(Ui.glass(TILE, Ui.dp(c, 22)));
         t.setClickable(true);
         Ui.pressable(t);
         t.setOnClickListener(v -> r.run());
@@ -1313,7 +1313,7 @@ final class ControlPanel extends FrameLayout {
         final boolean open = expanded.contains(pkg);
         LinearLayout card = new LinearLayout(c);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackground(Ui.round(TILE, Ui.dp(c, 22)));
+        card.setBackground(Ui.glass(TILE, Ui.dp(c, 22)));
         int shown = open ? g.size() : 1;
         for (int i = 0; i < shown; i++) {
             View row = notifRow(g.get(i), true);
@@ -1370,7 +1370,7 @@ final class ControlPanel extends FrameLayout {
         for (final NotifService.Gone g : h) {
             LinearLayout row = new LinearLayout(c);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setBackground(Ui.round(TILE, Ui.dp(c, 20)));
+            row.setBackground(Ui.glass(TILE, Ui.dp(c, 20)));
             int p = Ui.dpi(c, 12);
             row.setPadding(p, Ui.dpi(c, 10), p, Ui.dpi(c, 10));
             row.setAlpha(0.8f);
@@ -1418,7 +1418,7 @@ final class ControlPanel extends FrameLayout {
             NotifService.dismiss(s.getKey());
         }, () -> openNotif(s));
         row.setGravity(Gravity.TOP);
-        if (!inGroup) row.setBackground(Ui.round(TILE, Ui.dp(c, 22))); // in a group the card draws it
+        if (!inGroup) row.setBackground(Ui.glass(TILE, Ui.dp(c, 22))); // in a group the card draws it
         int p = Ui.dpi(c, 14);
         row.setPadding(p, p, p, p);
 
@@ -1428,7 +1428,7 @@ final class ControlPanel extends FrameLayout {
         android.graphics.drawable.Drawable d = null;
         try { if (n.getLargeIcon() != null) d = n.getLargeIcon().loadDrawable(c); } catch (Exception ignored) {}
         if (d != null) {
-            icon.setBackground(Ui.round(ROUND, Ui.dp(c, 20)));
+            icon.setBackground(Ui.glass(ROUND, Ui.dp(c, 20)));
             icon.setClipToOutline(true);
         } else {
             d = appIcon(pkg);
@@ -1498,7 +1498,7 @@ final class ControlPanel extends FrameLayout {
             b.setEllipsize(android.text.TextUtils.TruncateAt.END);
             b.setGravity(Gravity.CENTER);
             b.setPadding(Ui.dpi(c, 14), 0, Ui.dpi(c, 14), 0);
-            b.setBackground(Ui.round(ROUND, Ui.dp(c, 16)));
+            b.setBackground(Ui.glass(ROUND, Ui.dp(c, 16)));
             b.setClickable(true);
             Ui.pressable(b);
             final android.app.RemoteInput[] inputs = a.getRemoteInputs();
@@ -1529,7 +1529,7 @@ final class ControlPanel extends FrameLayout {
         replying = true;
         final LinearLayout box = new LinearLayout(c);
         box.setGravity(Gravity.CENTER_VERTICAL);
-        box.setBackground(Ui.round(ROUND, Ui.dp(c, 20)));
+        box.setBackground(Ui.glass(ROUND, Ui.dp(c, 20)));
         final android.widget.EditText field = new android.widget.EditText(c);
         field.setHint(inputs[0].getLabel() != null ? inputs[0].getLabel() : "Reply");
         field.setTextColor(Ui.FG);
@@ -1820,7 +1820,7 @@ final class ControlPanel extends FrameLayout {
         PanelIcons ic = new PanelIcons(c, icon, Ui.FG);
         int p = Ui.dpi(c, 12);
         ic.setPadding(p, p, p, p);
-        ic.setBackground(Ui.round(TILE, Ui.dp(c, 23)));
+        ic.setBackground(Ui.glass(TILE, Ui.dp(c, 23)));
         b.addView(ic, Ui.lp(Ui.dpi(c, 46), Ui.dpi(c, 46)));
         TextView t = Ui.text(c, label, 11.5f, Ui.FG2, false);
         b.addView(t, Ui.lp(-2, -2, Ui.dpi(c, 5)));
@@ -2153,8 +2153,8 @@ final class ControlPanel extends FrameLayout {
             if (shown != null && shown == on) { setIfChanged(state, s); return; }
             shown = on;
             Context c = getContext();
-            setBackground(Ui.round(on ? Ui.ACCENT : TILE, Ui.dp(c, 22)));
-            icon.setBackground(Ui.round(on ? 0x33FFFFFF : ROUND, Ui.dp(c, 22)));
+            setBackground(Ui.glass(on ? Ui.ACCENT : TILE, Ui.dp(c, 22)));
+            icon.setBackground(Ui.glass(on ? 0x33FFFFFF : ROUND, Ui.dp(c, 22)));
             icon.setColor(on ? Color.WHITE : Ui.FG);
             title.setTextColor(on ? Color.WHITE : Ui.FG);
             state.setText(s);
@@ -2201,7 +2201,7 @@ final class ControlPanel extends FrameLayout {
             if (shown != null && shown != on && SystemClock.uptimeMillis() < holdUntil) return;
             if (shown != null && shown == on) return;
             shown = on;
-            icon.setBackground(Ui.round(on ? Ui.ACCENT : ROUND, Ui.dp(getContext(), 27)));
+            icon.setBackground(Ui.glass(on ? Ui.ACCENT : ROUND, Ui.dp(getContext(), 27)));
             icon.setColor(on ? Color.WHITE : Ui.FG);
             label.setTextColor(on ? Ui.FG : Ui.FG2);
         }
