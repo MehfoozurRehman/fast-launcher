@@ -50,7 +50,9 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   and messages are frosted glass over the blurred wallpaper. Everything follows light and dark mode.
 - **Type**: clock, date and headings use Montserrat (bundled, SIL Open Font License, see `assets/fonts/OFL.txt`).
 - **Long-press home**: wallpaper panel, the launcher's only settings: your wallpaper large with New one
-  and Browse on it, a row of fresh picks to preview and set (kept until you tap Refresh), themes, auto-change and lock screen.
+  and Browse on it, a row of fresh picks to preview and set (kept until you tap Refresh), themes, auto-change, and the lock screen: its wallpaper Off / Same /
+  Dimmed / Blurred, and (with the adb grant) whether notifications and their contents show there.
+  The lock screen itself stays the system's; nothing replaces or covers it.
 - **Colours** follow the wallpaper: the accent is a soft tone of its most colourful colour (grey keeps blue).
   - Wallpapers come from [wallhaven.cc](https://wallhaven.cc) (SFW, portrait, at least 1080x1920).
   - **New one** swaps the wallpaper and remembers the old one as disliked, so it never comes back.

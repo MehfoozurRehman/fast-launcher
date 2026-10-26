@@ -291,13 +291,29 @@ final class WallpaperUi {
             card.addView(seg, Ui.lp(-1, -2, Ui.dpi(c, 8)));
             seg.setListener(i -> { Walls.setInterval(getContext(), i); refreshNext(); });
 
-            LinearLayout lockRow = new LinearLayout(c);
-            lockRow.setGravity(Gravity.CENTER_VERTICAL);
-            card.addView(lockRow, Ui.lp(-1, -2, Ui.dpi(c, 16)));
-            lockRow.addView(Ui.text(c, "Use on the lock screen too", 14.5f, Ui.FG, true), new LinearLayout.LayoutParams(0, -2, 1f));
-            Ui.Toggle toggle = new Ui.Toggle(c, Walls.lockToo(c));
-            toggle.setListener(v -> Walls.setLockToo(getContext(), v == 1));
-            lockRow.addView(toggle);
+            // --- lock screen: its wallpaper style, and (with the one-time grant) its notifications
+            LinearLayout lockHead = new LinearLayout(c);
+            lockHead.setGravity(Gravity.CENTER_VERTICAL);
+            card.addView(lockHead, Ui.lp(-1, -2, Ui.dpi(c, 18)));
+            lockHead.addView(Ui.label(c, "Lock screen"), new LinearLayout.LayoutParams(0, -2, 1f));
+            lockHead.addView(Ui.text(c, "Wallpaper", 11.5f, Ui.FG3, false));
+            Ui.Segmented lockSeg = new Ui.Segmented(c, LockScreen.LABELS, LockScreen.style(c));
+            card.addView(lockSeg, Ui.lp(-1, -2, Ui.dpi(c, 8)));
+            lockSeg.setListener(i -> {
+                LockScreen.setStyle(getContext(), i);
+                if (i == LockScreen.OFF) return;
+                final Context app = getContext().getApplicationContext();
+                host.wallWorker().execute(() -> {
+                    Walls.reapplyLock(app);
+                    host.runOnUi(() -> host.snack("Lock screen updated"));
+                });
+            });
+            if (LockScreen.canChangeNotifications(c)) {
+                card.addView(lockSwitch(c, "Show notifications", LockScreen.showNotifications(c),
+                        on -> LockScreen.setShowNotifications(getContext(), on)), Ui.lp(-1, -2, Ui.dpi(c, 14)));
+                card.addView(lockSwitch(c, "Hide message contents", LockScreen.hideContents(c),
+                        on -> LockScreen.setHideContents(getContext(), on)), Ui.lp(-1, -2, Ui.dpi(c, 12)));
+            }
 
             // --- a quiet way to send a report from the phone itself (no computer needed)
             TextView report = Ui.text(c, "Something not working?  Report a problem", 12.5f, Ui.FG3, false);
@@ -329,6 +345,17 @@ final class WallpaperUi {
                     }
                 });
             });
+        }
+
+        /** A one-line setting with a switch. */
+        private View lockSwitch(Context c, String label, boolean on, java.util.function.Consumer<Boolean> set) {
+            LinearLayout row = new LinearLayout(c);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.addView(Ui.text(c, label, 14.5f, Ui.FG, true), new LinearLayout.LayoutParams(0, -2, 1f));
+            Ui.Toggle t = new Ui.Toggle(c, on);
+            t.setListener(v -> set.accept(v == 1));
+            row.addView(t);
+            return row;
         }
 
         private View glassButton(Context c, Ui.Glyph g, int color) {
