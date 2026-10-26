@@ -353,6 +353,7 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
         if (s == null) return false;
         s.ensurePanel();
         if (!s.panelOpen) { s.captureBehind(); s.panel.refresh(true); }
+        else s.panel.openPage(true); // open or still closing: switch to notifications, don't reuse the old page
         s.showPanel();
         s.panel.animateTo(1f, 0f);
         return true;

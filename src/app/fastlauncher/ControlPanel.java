@@ -1898,8 +1898,26 @@ final class ControlPanel extends FrameLayout {
         animateTo(target, Math.abs(velocity));
     }
 
+    private float animTarget = -1f;
+
+    /** On its way out (the close animation is running). */
+    private boolean closing() { return anim != null && anim.isRunning() && animTarget == 0f; }
+
+    /** Finish any page change in flight, so "which page is showing" is the real answer. */
+    private void settlePages() {
+        if (dropAnim != null && dropAnim.isRunning()) dropAnim.end();
+        if (pageAnim != null && pageAnim.isRunning()) pageAnim.end();
+    }
+
+    /** Open on a given page even if the panel is already showing (or closing): used by the home swipe. */
+    void openPage(boolean notifications) {
+        settlePages();
+        showPage(notifications ? NOTIFS : CONTROLS);
+    }
+
     void animateTo(final float target, float velocity) {
         if (anim != null) anim.cancel();
+        animTarget = target;
         float dist = Math.abs(target - progress);
         long dur = Math.round(150 + 170 * dist);
         if (velocity > 300) dur = Math.max(130, Math.min(dur, Math.round(dist * cardTravel() / velocity * 1000 * 1.5f)));
@@ -1942,9 +1960,19 @@ final class ControlPanel extends FrameLayout {
                 // a pull from the status bar area while open: switch pages, like a pull when closed
                 topPull = downY < host.statusBarHeight() + Ui.dp(getContext(), 16);
                 topPulling = false;
+                reopening = false;
                 if (vt != null) vt.recycle();
                 vt = VelocityTracker.obtain();
                 vt.addMovement(e);
+                settlePages(); // a quick second pull must judge sides against the page really showing
+                if (topPull && closing()) {
+                    // pulled again while it was closing: stop, show the side that was pulled, follow
+                    anim.cancel();
+                    showPage(downX < getWidth() * 0.45f ? NOTIFS : CONTROLS);
+                    reopening = true;
+                    startProgress = progress;
+                    return true;
+                }
                 break;
             case MotionEvent.ACTION_MOVE:
                 if (vt != null) vt.addMovement(e);
@@ -1991,7 +2019,7 @@ final class ControlPanel extends FrameLayout {
         return false;
     }
 
-    private boolean topPull, topPulling;
+    private boolean topPull, topPulling, reopening;
     private int dropTo = -1;
     private ValueAnimator dropAnim;
 
@@ -2056,6 +2084,23 @@ final class ControlPanel extends FrameLayout {
     }
 
     @Override public boolean onTouchEvent(MotionEvent e) {
+        if (reopening) { // a pull that caught the panel while closing: it follows the finger down again
+            if (vt != null) vt.addMovement(e);
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_MOVE:
+                    setProgress(startProgress + Math.max(0f, e.getRawY() - downY) / cardTravel());
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    reopening = false;
+                    float vy = 0;
+                    if (vt != null) { vt.computeCurrentVelocity(1000); vy = vt.getYVelocity(); vt.recycle(); vt = null; }
+                    // a tap or any downward pull reopens; only a clear flick up lets it close
+                    animateTo(vy < -600 ? 0f : 1f, Math.abs(vy));
+                    return true;
+            }
+            return true;
+        }
         if (topPulling) { // the rest of a top pull is ours; it never closes the panel
             if (vt != null) vt.addMovement(e);
             int a = e.getActionMasked();
