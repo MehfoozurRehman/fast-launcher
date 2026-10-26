@@ -243,10 +243,11 @@ final class ControlPanel extends FrameLayout {
         ntitle.setTypeface(Ui.font(c, 650));
         nhead.addView(ntitle, new LinearLayout.LayoutParams(0, -2, 1f));
         // Clear all lives at the bottom of the card (added below), within thumb's reach
-        clearAll = Ui.text(c, "Clear all", 14.5f, Ui.FG, true);
+        clearAll = Ui.text(c, "Clear all", 13.5f, Ui.FG, true);
         clearAll.setTypeface(Ui.font(c, 600));
         clearAll.setGravity(Gravity.CENTER);
-        clearAll.setBackground(Ui.round(TILE, Ui.dp(c, 23)));
+        clearAll.setPadding(Ui.dpi(c, 22), 0, Ui.dpi(c, 22), 0);
+        clearAll.setBackground(Ui.round(TILE, Ui.dp(c, 20)));
         clearAll.setClickable(true);
         Ui.pressable(clearAll);
         clearAll.setOnClickListener(v -> { NotifService.dismissAll(); slideTo(CONTROLS); });
@@ -480,10 +481,14 @@ final class ControlPanel extends FrameLayout {
         lock.setOnClickListener(v -> closeThen(250, () -> host.globalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)));
         power.setOnClickListener(v -> closeThen(200, () -> host.globalAction(AccessibilityService.GLOBAL_ACTION_POWER_DIALOG)));
 
-        // outside the scrolling list, so it's always at the bottom however many notifications there are
-        LinearLayout.LayoutParams cap = Ui.lp(-1, Ui.dpi(c, 46), Ui.dpi(c, 10));
-        cap.leftMargin = cap.rightMargin = Ui.dpi(c, 12);
-        card.addView(clearAll, cap);
+        // near the bottom edge of the screen, where the thumb is, whatever the length of the list
+        int nav = 0;
+        int navId = getResources().getIdentifier("navigation_bar_height", "dimen", "android");
+        if (navId > 0) nav = getResources().getDimensionPixelSize(navId);
+        clearReserve = nav + Ui.dpi(c, 28 + 40 + 12); // the list stops above it
+        LayoutParams cap = new LayoutParams(-2, Ui.dpi(c, 40), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        cap.bottomMargin = nav + Ui.dpi(c, 28);
+        addView(clearAll, cap);
 
         dots = new Dots(c);
         View handle = dots;
@@ -1122,12 +1127,20 @@ final class ControlPanel extends FrameLayout {
     }
 
     private boolean hasNotifs;
+    private int clearReserve;
+    private float clearFade = 1f; // fades while the notifications page slides away
 
     /** Clear all: on the notifications page when there's something to clear, else out of the way. */
     private void updateClearAll() {
-        int vis = page == NOTIFS && hasNotifs ? VISIBLE : GONE;
+        boolean on = page == NOTIFS && hasNotifs;
+        int vis = on ? VISIBLE : GONE;
         if (clearAll.getVisibility() != vis) clearAll.setVisibility(vis);
-        clearAll.setAlpha(1f);
+        clearFade = 1f;
+        clearAll.setAlpha(progress * clearFade);
+        // the card (and its list) stops above the button, so nothing hides behind it
+        LayoutParams lp = (LayoutParams) card.getLayoutParams();
+        int bottom = on ? clearReserve : Ui.dpi(getContext(), 24);
+        if (lp.bottomMargin != bottom) { lp.bottomMargin = bottom; card.setLayoutParams(lp); }
     }
 
     // ---------------------------------------------------------------- swiping between pages
@@ -1158,7 +1171,7 @@ final class ControlPanel extends FrameLayout {
             float f = Math.min(1f, Math.abs(offset) / w);
             float a = from == NOTIFS ? 0f : 1f, b = to == NOTIFS ? 0f : 1f;
             dots.setPosition(a + (b - a) * f);
-            if (from == NOTIFS) clearAll.setAlpha(1f - f); // fades as the notifications slide away
+            if (from == NOTIFS) { clearFade = 1f - f; clearAll.setAlpha(progress * clearFade); } // fades as the notifications slide away
         }
     }
 
@@ -1657,6 +1670,9 @@ final class ControlPanel extends FrameLayout {
         float h = card.getHeight() > 0 ? cardTravel() : getResources().getDisplayMetrics().heightPixels;
         card.setTranslationY(-(1f - progress) * h);
         scrim.setAlpha(progress);
+        // Clear all rises from the bottom as the panel comes down
+        clearAll.setAlpha(progress * clearFade);
+        clearAll.setTranslationY((1f - progress) * Ui.dp(getContext(), 48));
     }
 
     /** Follow a pull from the status bar: dy is how far the finger has come down. */
