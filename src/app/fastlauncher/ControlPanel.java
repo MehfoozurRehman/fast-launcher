@@ -62,6 +62,8 @@ final class ControlPanel extends FrameLayout {
     interface Host {
         void launch(Intent i);
         void globalAction(int action);
+        /** Press the phone's own Control Centre tile with this label, out of sight. */
+        void pressTile(String label, java.util.function.Consumer<Boolean> done);
         void finishHide();
         int statusBarHeight();
     }
@@ -302,7 +304,7 @@ final class ControlPanel extends FrameLayout {
         btToggle.setPadding(Ui.dpi(c, 18), 0, Ui.dpi(c, 18), 0);
         btToggle.setClickable(true);
         Ui.pressable(btToggle);
-        btToggle.setOnClickListener(v -> requestBt(!btOn()));
+        btToggle.setOnClickListener(v -> systemToggle("Bluetooth", null, null));
         bhead.addView(btToggle, Ui.lp(-2, Ui.dpi(c, 36)));
         bpage.addView(bhead, Ui.lp(-1, -2));
         btList = new LinearLayout(c);
@@ -323,12 +325,14 @@ final class ControlPanel extends FrameLayout {
         torch = new Item(c, PanelIcons.TORCH, "Torch");
         body.addView(pair(c, wifi, data), Ui.lp(-1, Ui.dpi(c, 64)));
         body.addView(pair(c, bluetooth, torch), Ui.lp(-1, Ui.dpi(c, 64), Ui.dpi(c, 8)));
-        wifi.setOnClickListener(v -> open(new Intent(Settings.Panel.ACTION_WIFI)));
-        wifi.setOnLongClickListener(v -> { open(new Intent(Settings.ACTION_WIFI_SETTINGS)); return true; });
+        // tap switches it right here; long-press opens the network list
+        wifi.setOnClickListener(v -> systemToggle("Wi-Fi", wifi, new Intent(Settings.Panel.ACTION_WIFI)));
+        wifi.setOnLongClickListener(v -> { open(new Intent(Settings.Panel.ACTION_WIFI)); return true; });
         // on: show paired devices here; off: Android's one-tap "turn on" prompt. Long-press: settings
-        bluetooth.setOnClickListener(v -> { if (btOn()) slideTo(BT); else requestBt(true); });
+        bluetooth.setOnClickListener(v -> { if (btOn()) slideTo(BT); else systemToggle("Bluetooth", bluetooth, null); });
         bluetooth.setOnLongClickListener(v -> { open(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); return true; });
-        data.setOnClickListener(v -> open(new Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)));
+        data.setOnClickListener(v -> systemToggle("Mobile data", data, new Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)));
+        data.setOnLongClickListener(v -> { open(new Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)); return true; });
         torch.setOnClickListener(v -> safe(this::toggleTorch));
 
         // ---- media (half the width) beside the two sliders, all in one row
@@ -459,16 +463,20 @@ final class ControlPanel extends FrameLayout {
         grid.saved = ids -> prefs.edit().putString("order", ids).apply();
         body.addView(grid, Ui.lp(-1, -2, Ui.dpi(c, 10)));
 
-        hotspot.setOnClickListener(v -> open(new Intent(Settings.ACTION_WIRELESS_SETTINGS)));
+        // these switch in place by pressing the phone's own tile out of sight; long-press: settings
+        hotspot.setOnClickListener(v -> systemToggle("Hotspot", hotspot, new Intent(Settings.ACTION_WIRELESS_SETTINGS)));
+        hotspot.setOnLongClickListener(v -> { open(new Intent(Settings.ACTION_WIRELESS_SETTINGS)); return true; });
         rotate.setOnClickListener(v -> safe(this::toggleRotation));
-        plane.setOnClickListener(v -> open(new Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS)));
-        location.setOnClickListener(v -> open(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)));
+        plane.setOnClickListener(v -> systemToggle("Aeroplane mode", plane, new Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS)));
+        location.setOnClickListener(v -> systemToggle("Location", location, new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)));
+        location.setOnLongClickListener(v -> { open(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)); return true; });
         // Honor's dark-mode screen isn't open to other apps; its switch lives in Display settings
-        dark.setOnClickListener(v -> open(new Intent(Settings.ACTION_DISPLAY_SETTINGS)));
+        dark.setOnClickListener(v -> systemToggle("Dark mode", dark, new Intent(Settings.ACTION_DISPLAY_SETTINGS)));
         dnd.setOnClickListener(v -> safe(this::toggleDnd));
         sound.setOnClickListener(v -> safe(this::cycleSound));
-        eye.setOnClickListener(v -> open(new Intent(Settings.ACTION_DISPLAY_SETTINGS)));
-        saver.setOnClickListener(v -> open(new Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS)));
+        eye.setOnClickListener(v -> systemToggle("Eye Comfort", eye, new Intent(Settings.ACTION_DISPLAY_SETTINGS)));
+        saver.setOnClickListener(v -> systemToggle("Power Saving", saver, new Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS)));
+        saver.setOnLongClickListener(v -> { open(new Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS)); return true; });
         screenshot.setOnClickListener(v -> closeThen(380, () -> host.globalAction(AccessibilityService.GLOBAL_ACTION_TAKE_SCREENSHOT)));
         record.setOnClickListener(v -> {
             boolean was = Recorder.recording;
@@ -622,7 +630,9 @@ final class ControlPanel extends FrameLayout {
         });
         safe(this::showSound);
         safe(() -> eye.setActive(Settings.System.getInt(c.getContentResolver(), "eyes_protection_mode", 0) == 1));
-        safe(() -> saver.setActive(((PowerManager) c.getSystemService(Context.POWER_SERVICE)).isPowerSaveMode()));
+        // Honor's power saving is its own mode (SmartModeStatus 4), not always Android's battery saver
+        safe(() -> saver.setActive(((PowerManager) c.getSystemService(Context.POWER_SERVICE)).isPowerSaveMode()
+                || Settings.System.getInt(c.getContentResolver(), "SmartModeStatus", 1) == 4));
         record.setActive(Recorder.recording);
         safe(this::bindMedia);
     }
@@ -968,6 +978,36 @@ final class ControlPanel extends FrameLayout {
     private boolean btOn() {
         try { android.bluetooth.BluetoothAdapter a = btAdapter(); return a != null && a.isEnabled(); }
         catch (Exception e) { return false; }
+    }
+
+    /**
+     * Switch something Android doesn't let apps switch (Wi-Fi, hotspot, aeroplane mode...): our
+     * button flips at once, the phone's own Control Centre tile is pressed out of sight, and the
+     * real state is read back. If the tile can't be found, the old settings screen opens instead.
+     */
+    private void systemToggle(final String label, final View button, final Intent fallback) {
+        if (button instanceof Round) ((Round) button).flip();
+        else if (button instanceof Item) ((Item) button).flip();
+        if (button != null) button.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        host.pressTile(label, ok -> {
+            if (!ok) {
+                if (fallback != null) open(fallback);
+                else if ("Bluetooth".equals(label)) requestBt(!btOn());
+            }
+            // read the real state back once the system has acted (and once more for slow ones)
+            main.postDelayed(this::refreshStates, 500);
+            main.postDelayed(this::refreshStates, 1600);
+        });
+    }
+
+    /** Re-read every control's state without disturbing the page or scroll position. */
+    private void refreshStates() {
+        if (progress <= 0f) return;
+        int y = scroll.getScrollY();
+        int was = page;
+        refresh(was == NOTIFS);
+        if (was == BT) showPage(BT);
+        scroll.scrollTo(0, y);
     }
 
     /** Apps can't switch Bluetooth themselves any more; Android shows its own one-tap prompt. */
@@ -1870,6 +1910,11 @@ final class ControlPanel extends FrameLayout {
 
         private Boolean shown;
 
+        void flip() {
+            boolean on = shown == null || !shown;
+            set(on, on ? "Turning on\u2026" : "Turning off\u2026");
+        }
+
         void set(boolean on, String s) {
             if (shown != null && shown == on) { setIfChanged(state, s); return; }
             shown = on;
@@ -1909,6 +1954,8 @@ final class ControlPanel extends FrameLayout {
         }
 
         private Boolean shown;
+
+        void flip() { setActive(shown == null || !shown); }
 
         void setActive(boolean on) {
             if (shown != null && shown == on) return;

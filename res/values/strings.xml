@@ -1,4 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="panel_description">Pull down from the right side of the status bar to open the Fast Launcher control panel. Used only to show the panel over other apps, close it with Back, and take screenshots or lock the phone from it. It does not read anything on your screen.</string>
+    <string name="panel_description">Pull down from the status bar to open the Fast Launcher notifications and control panel. Used to show the panel over other apps, close it with Back, take screenshots, lock the phone, and blur what is behind the panel. To switch Wi-Fi, hotspot, aeroplane mode and similar settings, it presses the matching switch in the phone\'s own Control Centre, out of sight. It reads only that Control Centre, never your apps, and stores nothing.</string>
 </resources>

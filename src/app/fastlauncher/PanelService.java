@@ -35,6 +35,129 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
     /** The connected service, so the launcher can lock the screen (double-tap on home). */
     static PanelService running;
 
+    // ================================================================ system tiles (experiment)
+
+    /**
+     * Press one of the phone's own Control Centre tiles (found by its label), without showing it:
+     * open the system panel behind ours, click the tile through accessibility, close it again.
+     * done gets true if the tile was found and clicked.
+     */
+    private static boolean tileBusy;
+    /** Presses asked for while one is running: done in order, never dropped. */
+    private static final java.util.ArrayDeque<Object[]> tileQueue = new java.util.ArrayDeque<>();
+
+    @SuppressWarnings("unchecked")
+    static void pressSystemTile(final String label, final java.util.function.Consumer<Boolean> done0) {
+        final PanelService s = running;
+        if (s == null) { done0.accept(false); return; }
+        if (tileBusy) { tileQueue.add(new Object[]{label, done0}); return; }
+        tileBusy = true;
+        final java.util.function.Consumer<Boolean> done = ok -> {
+            tileBusy = false;
+            done0.accept(ok);
+            Object[] next = tileQueue.poll();
+            if (next != null) s.main.post(() -> pressSystemTile((String) next[0], (java.util.function.Consumer<Boolean>) next[1]));
+        };
+        s.stepAside(true);
+        s.performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS);
+        final long start = android.os.SystemClock.uptimeMillis();
+        s.main.postDelayed(new Runnable() {
+            @Override public void run() {
+                android.view.accessibility.AccessibilityNodeInfo tile = s.findTile(label);
+                if (tile != null) {
+                    boolean ok = tile.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK);
+                    Diag.log("tile '" + label + "' clicked=" + ok + " after " + (android.os.SystemClock.uptimeMillis() - start) + "ms");
+                    s.main.postDelayed(() -> s.closeSystemPanel(() -> done.accept(ok)), 180);
+                    return;
+                }
+                if (android.os.SystemClock.uptimeMillis() - start > 1500) {
+                    Diag.log("tile '" + label + "' not found");
+                    s.closeSystemPanel(() -> done.accept(false));
+                    return;
+                }
+                s.main.postDelayed(this, 60);
+            }
+        }, 120);
+    }
+
+    /** Honor ignores "dismiss the shade"; Back closes it. Checked: only when it's still there. */
+    private void closeSystemPanel(Runnable after) {
+        performGlobalAction(15 /* GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE */);
+        main.postDelayed(() -> {
+            if (systemPanelShowing()) performGlobalAction(GLOBAL_ACTION_BACK);
+            main.postDelayed(() -> { stepAside(false); after.run(); }, 150);
+        }, 120);
+    }
+
+    /**
+     * While pressing a system tile behind our panel: our window gives up focus (so the Back that
+     * closes the system panel reaches it, not us), and our Back handling stands down.
+     */
+    private boolean asideForTile;
+
+    private void stepAside(boolean aside) {
+        asideForTile = aside;
+        if (!panelOpen || panel == null) return;
+        if (aside) panelLp.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+        else panelLp.flags &= ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+        try { wm.updateViewLayout(panel, panelLp); } catch (Exception ignored) {}
+    }
+
+    private boolean systemPanelShowing() {
+        for (android.view.accessibility.AccessibilityWindowInfo w : getWindows()) {
+            android.view.accessibility.AccessibilityNodeInfo r = w.getRoot();
+            if (r != null && r.getPackageName() != null && "com.android.systemui".contentEquals(r.getPackageName())
+                    && w.getType() == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM
+                    && r.getChildCount() > 0 && !r.findAccessibilityNodeInfosByText("Open settings").isEmpty()) return true;
+        }
+        return false;
+    }
+
+    /**
+     * The system tile for a label: a clickable node described as "Label" or "Label,state..."
+     * ("Hotspot,Enabled"), in the system UI only. Exact, so "Wi-Fi" can't hit another tile.
+     */
+    private android.view.accessibility.AccessibilityNodeInfo findTile(String label) {
+        String want = label.toLowerCase(java.util.Locale.ROOT);
+        for (android.view.accessibility.AccessibilityWindowInfo w : getWindows()) {
+            android.view.accessibility.AccessibilityNodeInfo root = w.getRoot();
+            if (root == null || root.getPackageName() == null || !"com.android.systemui".contentEquals(root.getPackageName())) continue;
+            for (android.view.accessibility.AccessibilityNodeInfo n : root.findAccessibilityNodeInfosByText(label)) {
+                CharSequence d = n.getContentDescription() != null ? n.getContentDescription() : n.getText();
+                if (d == null) continue;
+                String t = d.toString().replace("\u200b", "").toLowerCase(java.util.Locale.ROOT);
+                if (!(t.equals(want) || t.startsWith(want + ","))) continue;
+                android.view.accessibility.AccessibilityNodeInfo c = n;
+                while (c != null && !c.isClickable()) c = c.getParent();
+                if (c != null) return c;
+            }
+        }
+        return null;
+    }
+
+    /** Debug: list what the system panel offers (texts of clickable nodes). */
+    static void dumpSystemTiles() {
+        final PanelService s = running;
+        if (s == null) return;
+        s.performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS);
+        s.main.postDelayed(() -> {
+            for (android.view.accessibility.AccessibilityWindowInfo w : s.getWindows()) {
+                android.view.accessibility.AccessibilityNodeInfo root = w.getRoot();
+                if (root == null || root.getPackageName() == null || !"com.android.systemui".contentEquals(root.getPackageName())) continue;
+                s.dump(root, 0);
+            }
+            s.performGlobalAction(15);
+        }, 700);
+    }
+
+    private void dump(android.view.accessibility.AccessibilityNodeInfo n, int depth) {
+        if (n == null || depth > 25) return;
+        CharSequence t = n.getText(), d = n.getContentDescription();
+        if ((t != null || d != null) && (n.isClickable() || (n.getParent() != null && n.getParent().isClickable())))
+            android.util.Log.i("FLTiles", "text=" + t + " desc=" + d + " click=" + n.isClickable() + " checked=" + n.isChecked());
+        for (int i = 0; i < n.getChildCount(); i++) dump(n.getChild(i), depth + 1);
+    }
+
     static boolean lockScreen() {
         PanelService s = running;
         return s != null && s.performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN);
@@ -99,7 +222,7 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
     @Override public void onInterrupt() {}
 
     @Override protected boolean onKeyEvent(KeyEvent e) {
-        if (panelOpen && e.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+        if (panelOpen && !asideForTile && e.getKeyCode() == KeyEvent.KEYCODE_BACK) {
             if (e.getAction() == KeyEvent.ACTION_UP) panel.close();
             return true;
         }
@@ -330,6 +453,8 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
         if (panel == null) return;
         panelOpen = false;
         panel.setProgress(0f);
+        // the theme flipped while the panel was open (its own Dark mode button): rebuild it now
+        if (panel.isDark != Ui.dark) main.post(() -> { if (!panelOpen) onConfigurationChanged(getResources().getConfiguration()); });
         panel.unbind();
         panelLp.alpha = 0f;
         panelLp.flags = hiddenFlags();
@@ -339,6 +464,8 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
     @Override public void launch(Intent i) {
         try { startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); } catch (Exception ignored) {}
     }
+
+    @Override public void pressTile(String label, java.util.function.Consumer<Boolean> done) { pressSystemTile(label, done); }
 
     @Override public void globalAction(int action) {
         performGlobalAction(action);

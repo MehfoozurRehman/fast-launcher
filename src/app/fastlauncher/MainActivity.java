@@ -184,6 +184,11 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 return;
             }
             if ("testnotif".equals(what)) { postTestNotification(); return; }
+            if ("tiles".equals(what)) { PanelService.dumpSystemTiles(); return; }
+            if (what != null && what.startsWith("tile:")) {
+                PanelService.pressSystemTile(what.substring(5), ok -> Diag.log("tile result " + ok));
+                return;
+            }
             if ("gc".equals(what)) { // leak checks: count only what's really still referenced
                 for (int k = 0; k < 3; k++) { Runtime.getRuntime().gc(); System.runFinalization(); }
                 return;
