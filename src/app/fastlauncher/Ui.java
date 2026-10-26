@@ -770,6 +770,8 @@ final class Ui {
 
         void setPlaceholder(int color) { ph.setColor(color); invalidate(); }
 
+        Bitmap bitmap() { return bmp; }
+
         void setBitmap(Bitmap b) {
             bmp = b;
             if (b != null) {

@@ -234,7 +234,7 @@ final class WallpaperUi {
             psp.leftMargin = psp.rightMargin = -edge;
             card.addView(pickScroll, psp);
             card.setClipToPadding(false);
-            for (int i = 0; i < 6; i++) picks.addView(pickTile(c, null), pickLp(c, i));
+            for (int i = 0; i < PICKS; i++) picks.addView(pickTile(c, null), pickLp(c, i));
 
             // --- themes: one row that scrolls sideways
             LinearLayout themeHead = new LinearLayout(c);
@@ -348,10 +348,36 @@ final class WallpaperUi {
             return t;
         }
 
+        static final int PICKS = 8;
+        private android.animation.ValueAnimator pulse;
+
+        /** Empty tiles breathe gently while the picks are on their way. */
+        private void setLoading(boolean on) {
+            if (on) {
+                if (pulse != null) return;
+                pulse = android.animation.ValueAnimator.ofFloat(1f, 0.45f);
+                pulse.setDuration(750);
+                pulse.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+                pulse.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+                pulse.addUpdateListener(a -> {
+                    float v = (Float) a.getAnimatedValue();
+                    for (int i = 0; i < picks.getChildCount(); i++) {
+                        if (i >= pickWalls.size()) picks.getChildAt(i).setAlpha(v);
+                    }
+                });
+                pulse.start();
+            } else if (pulse != null) {
+                pulse.cancel();
+                pulse = null;
+                for (int i = 0; i < picks.getChildCount(); i++) picks.getChildAt(i).setAlpha(1f);
+            }
+        }
+
         /** A handful of new wallpapers from the chosen themes; fetched again after ten minutes. */
         private void loadPicks() {
             if (picksLoading || (System.currentTimeMillis() - picksAt < 10 * 60_000 && !pickWalls.isEmpty())) return;
             picksLoading = true;
+            if (pickWalls.isEmpty()) setLoading(true);
             final Context app = getContext().getApplicationContext();
             host.wallWorker().execute(() -> {
                 List<Walls.Wall> got = new ArrayList<>();
@@ -369,9 +395,10 @@ final class WallpaperUi {
                     }
                     java.util.Collections.shuffle(got);
                 } catch (Exception ignored) {}
-                final List<Walls.Wall> result = got.size() > 10 ? got.subList(0, 10) : got;
+                final List<Walls.Wall> result = got.size() > PICKS ? got.subList(0, PICKS) : got;
                 host.runOnUi(() -> {
                     picksLoading = false;
+                    setLoading(false);
                     if (result.isEmpty()) return;
                     picksAt = System.currentTimeMillis();
                     pickWalls.clear();
@@ -382,14 +409,15 @@ final class WallpaperUi {
         }
 
         private void showPicks() {
-            Context c = getContext();
             if (pickThumbs == null) pickThumbs = new Thumbs(this::showPickImages);
-            picks.removeAllViews();
-            for (int i = 0; i < pickWalls.size(); i++) {
+            for (int i = 0; i < picks.getChildCount(); i++) {
+                Ui.RoundImage t = (Ui.RoundImage) picks.getChildAt(i);
+                if (i >= pickWalls.size()) { t.setVisibility(GONE); continue; }
                 final Walls.Wall w = pickWalls.get(i);
-                Ui.RoundImage t = pickTile(c, w);
+                t.setVisibility(VISIBLE);
+                t.setBitmap(null);
+                t.setPlaceholder(Ui.darken(w.color, 0.75f)); // its colour first, the picture fades in after
                 t.setOnClickListener(v -> new Preview(host, w, pickThumbs.get(w.thumb)).open());
-                picks.addView(t, pickLp(c, i));
             }
             showPickImages();
         }
@@ -397,7 +425,8 @@ final class WallpaperUi {
         private void showPickImages() {
             for (int i = 0; i < picks.getChildCount() && i < pickWalls.size(); i++) {
                 Bitmap b = pickThumbs.get(pickWalls.get(i).thumb);
-                if (b != null) ((Ui.RoundImage) picks.getChildAt(i)).setBitmap(b);
+                Ui.RoundImage t = (Ui.RoundImage) picks.getChildAt(i);
+                if (b != null && t.bitmap() != b) t.setBitmap(b);
             }
         }
 
