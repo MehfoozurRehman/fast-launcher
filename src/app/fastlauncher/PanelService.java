@@ -62,7 +62,14 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
         s.performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS);
         final long start = android.os.SystemClock.uptimeMillis();
         s.main.postDelayed(new Runnable() {
+            boolean asked; // the system panel was asked for a second time
             @Override public void run() {
+                long t = android.os.SystemClock.uptimeMillis() - start;
+                // a busy phone can be slow to show it, or open it on another tab: ask once more
+                if (!asked && t > 1100) {
+                    asked = true;
+                    s.performGlobalAction(GLOBAL_ACTION_QUICK_SETTINGS);
+                }
                 android.view.accessibility.AccessibilityNodeInfo tile = s.findTile(label);
                 if (tile != null) {
                     boolean ok = tile.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK);
@@ -70,7 +77,7 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
                     s.main.postDelayed(() -> s.closeSystemPanel(() -> done.accept(ok)), 180);
                     return;
                 }
-                if (android.os.SystemClock.uptimeMillis() - start > 1500) {
+                if (t > 3200) {
                     Diag.log("tile '" + label + "' not found");
                     s.closeSystemPanel(() -> done.accept(false));
                     return;
@@ -81,6 +88,155 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
     }
 
     /** Honor ignores "dismiss the shade"; Back closes it. Checked: only when it's still there. */
+    // ================================================================ settings, out of sight
+
+    /** How pressing an entry in a settings screen went. */
+    static final int DONE = 0, NEEDS_YOU = 1, NOT_FOUND = 2;
+
+    /**
+     * Open a settings screen behind our panel, tap the entry labelled `name` (a Wi-Fi network, a
+     * Bluetooth device), and leave again: the same idea as the Control Centre tiles, for things
+     * apps can't do themselves. If the system then asks for something (a password, a pairing
+     * code), NEEDS_YOU is reported and that screen is left up for the user.
+     */
+    static void pressInSettings(Intent screen, final String name, final java.util.function.IntConsumer done) {
+        pressInSettings(screen, name, null, done);
+    }
+
+    /** confirm: the button to press if the system asks "are you sure?" (Bluetooth's "Disconnect?" OK). */
+    static void pressInSettings(Intent screen, final String name, final String confirm, final java.util.function.IntConsumer done) {
+        final PanelService s = running;
+        if (s == null) { done.accept(NOT_FOUND); return; }
+        s.stepAside(true);
+        try { s.startActivity(screen.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION)); }
+        catch (Exception e) { s.stepAside(false); done.accept(NOT_FOUND); return; }
+        final long start = android.os.SystemClock.uptimeMillis();
+        s.main.postDelayed(new Runnable() {
+            @Override public void run() {
+                android.view.accessibility.AccessibilityNodeInfo entry = s.findInApp("com.android.settings", name);
+                if (entry == null && s.revealMore()) { s.main.postDelayed(this, 250); return; }
+                if (entry == null) {
+                    if (android.os.SystemClock.uptimeMillis() - start < 3500) { s.main.postDelayed(this, 120); return; }
+                    Diag.log("settings entry '" + name + "' not found");
+                    s.leaveSettings(() -> done.accept(NOT_FOUND));
+                    return;
+                }
+                entry.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK);
+                // an "are you sure?" box: answer it (only with the button we were told to expect)
+                if (confirm != null) s.main.postDelayed(() -> {
+                    android.view.accessibility.AccessibilityNodeInfo ok = s.findButton(confirm);
+                    if (ok != null) ok.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK);
+                }, 450);
+                // give the system a moment to act, then see whether it's asking for something
+                s.main.postDelayed(() -> {
+                    if (s.asksForInput()) { s.stepAside(false); done.accept(NEEDS_YOU); }
+                    else s.leaveSettings(() -> done.accept(DONE));
+                }, confirm != null ? 1300 : 900);
+            }
+        }, 250);
+    }
+
+    private int revealed;
+
+    /** Find more entries: tap "Show more", or scroll the list on; false when there's nothing more. */
+    private boolean revealMore() {
+        if (revealed >= 6) { revealed = 0; return false; }
+        revealed++;
+        for (android.view.accessibility.AccessibilityWindowInfo w : getWindows()) {
+            android.view.accessibility.AccessibilityNodeInfo root = w.getRoot();
+            if (root == null || root.getPackageName() == null || !"com.android.settings".contentEquals(root.getPackageName())) continue;
+            for (android.view.accessibility.AccessibilityNodeInfo n : root.findAccessibilityNodeInfosByText("Show more")) {
+                android.view.accessibility.AccessibilityNodeInfo c = n;
+                while (c != null && !c.isClickable()) c = c.getParent();
+                if (c != null && c.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)) return true;
+            }
+            android.view.accessibility.AccessibilityNodeInfo list = scrollable(root, 0);
+            if (list != null && list.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)) return true;
+        }
+        revealed = 0;
+        return false;
+    }
+
+    private static android.view.accessibility.AccessibilityNodeInfo scrollable(android.view.accessibility.AccessibilityNodeInfo n, int depth) {
+        if (n == null || depth > 25) return null;
+        if (n.isScrollable()) return n;
+        for (int i = 0; i < n.getChildCount(); i++) {
+            android.view.accessibility.AccessibilityNodeInfo f = scrollable(n.getChild(i), depth + 1);
+            if (f != null) return f;
+        }
+        return null;
+    }
+
+    /** A button with exactly this text in a settings window or dialog. */
+    private android.view.accessibility.AccessibilityNodeInfo findButton(String text) {
+        for (android.view.accessibility.AccessibilityWindowInfo w : getWindows()) {
+            android.view.accessibility.AccessibilityNodeInfo root = w.getRoot();
+            if (root == null || root.getPackageName() == null || !"com.android.settings".contentEquals(root.getPackageName())) continue;
+            for (android.view.accessibility.AccessibilityNodeInfo n : root.findAccessibilityNodeInfosByText(text)) {
+                CharSequence t = n.getText();
+                if (t != null && text.equalsIgnoreCase(t.toString().trim()) && n.isClickable()) return n;
+            }
+        }
+        return null;
+    }
+
+    /** The clickable entry in an app's window whose text is exactly `name`. */
+    private android.view.accessibility.AccessibilityNodeInfo findInApp(String pkg, String name) {
+        for (android.view.accessibility.AccessibilityWindowInfo w : getWindows()) {
+            android.view.accessibility.AccessibilityNodeInfo root = w.getRoot();
+            if (root == null || root.getPackageName() == null || !pkg.contentEquals(root.getPackageName())) continue;
+            for (android.view.accessibility.AccessibilityNodeInfo n : root.findAccessibilityNodeInfosByText(name)) {
+                CharSequence t = n.getText();
+                if (t == null || !name.contentEquals(t.toString().trim())) continue;
+                android.view.accessibility.AccessibilityNodeInfo c = n;
+                while (c != null && !c.isClickable()) c = c.getParent();
+                if (c != null) return c;
+            }
+        }
+        return null;
+    }
+
+    /** A text field showing in the settings app or a system dialog (password, PIN). */
+    private boolean asksForInput() {
+        for (android.view.accessibility.AccessibilityWindowInfo w : getWindows()) {
+            android.view.accessibility.AccessibilityNodeInfo root = w.getRoot();
+            if (root == null || root.getPackageName() == null) continue;
+            String p = root.getPackageName().toString();
+            if (!p.equals("com.android.settings") && !p.equals("com.android.systemui") && !p.equals("android")) continue;
+            if (hasEditable(root, 0)) return true;
+        }
+        return false;
+    }
+
+    private static boolean hasEditable(android.view.accessibility.AccessibilityNodeInfo n, int depth) {
+        if (n == null || depth > 30) return false;
+        if (n.isEditable() && n.isVisibleToUser()) return true;
+        for (int i = 0; i < n.getChildCount(); i++) if (hasEditable(n.getChild(i), depth + 1)) return true;
+        return false;
+    }
+
+    /** Back out of the settings screen we opened (a details page may need two). */
+    private void leaveSettings(Runnable after) {
+        performGlobalAction(GLOBAL_ACTION_BACK);
+        main.postDelayed(() -> {
+            if (findSettingsWindow()) performGlobalAction(GLOBAL_ACTION_BACK);
+            main.postDelayed(() -> {
+                if (findSettingsWindow()) performGlobalAction(GLOBAL_ACTION_BACK);
+                stepAside(false);
+                after.run();
+            }, 250);
+        }, 300);
+    }
+
+    private boolean findSettingsWindow() {
+        for (android.view.accessibility.AccessibilityWindowInfo w : getWindows()) {
+            android.view.accessibility.AccessibilityNodeInfo r = w.getRoot();
+            if (r != null && r.getPackageName() != null && "com.android.settings".contentEquals(r.getPackageName())
+                    && w.getType() == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION) return true;
+        }
+        return false;
+    }
+
     private void closeSystemPanel(Runnable after) {
         performGlobalAction(15 /* GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE */);
         main.postDelayed(() -> {

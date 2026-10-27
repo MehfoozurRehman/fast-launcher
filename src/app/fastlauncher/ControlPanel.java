@@ -82,6 +82,9 @@ final class ControlPanel extends FrameLayout {
     static final int CONTROLS = 0, NOTIFS = 1, BT = 2;
     private int page = CONTROLS;
     private final ScrollView btScroll;
+    /** The detail page (slot after the controls) shows Wi-Fi networks or Bluetooth devices. */
+    private boolean detailWifi;
+    private TextView detailTitle, detailMore;
     private final FrameLayout pager;
     private final Dots dots;
     private boolean paging, fromEdge;
@@ -304,9 +307,10 @@ final class ControlPanel extends FrameLayout {
         Ui.pressable(back);
         back.setOnClickListener(v -> slideTo(CONTROLS));
         bhead.addView(back, Ui.lp(Ui.dpi(c, 36), Ui.dpi(c, 36)));
-        TextView btitle = Ui.text(c, "Bluetooth", 17, Ui.FG, true);
+        TextView btitle = detailTitle = Ui.text(c, "Bluetooth", 17, Ui.FG, true);
         btitle.setTypeface(Ui.font(c, 650));
         btitle.setPadding(Ui.dpi(c, 12), 0, 0, 0);
+        btitle.setVisibility(INVISIBLE); // the header already names the page
         bhead.addView(btitle, new LinearLayout.LayoutParams(0, -2, 1f));
         btToggle = Ui.text(c, "On", 13.5f, Color.WHITE, true);
         btToggle.setTypeface(Ui.font(c, 600));
@@ -314,15 +318,16 @@ final class ControlPanel extends FrameLayout {
         btToggle.setPadding(Ui.dpi(c, 18), 0, Ui.dpi(c, 18), 0);
         btToggle.setClickable(true);
         Ui.pressable(btToggle);
-        btToggle.setOnClickListener(v -> systemToggle("Bluetooth", null, null));
+        btToggle.setOnClickListener(v -> systemToggle(detailWifi ? "Wi-Fi" : "Bluetooth", null, null));
         bhead.addView(btToggle, Ui.lp(-2, Ui.dpi(c, 36)));
         bpage.addView(bhead, Ui.lp(-1, -2));
         btList = new LinearLayout(c);
         btList.setOrientation(LinearLayout.VERTICAL);
         bpage.addView(btList, Ui.lp(-1, -2, Ui.dpi(c, 12)));
         LinearLayout bfoot = new LinearLayout(c);
-        bfoot.addView(pill(c, "Pair new device", () -> open(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS))),
-                new LinearLayout.LayoutParams(0, Ui.dpi(c, 44), 1f));
+        detailMore = pill(c, "More Bluetooth settings", () -> open(new Intent(detailWifi
+                ? Settings.ACTION_WIFI_SETTINGS : Settings.ACTION_BLUETOOTH_SETTINGS)));
+        bfoot.addView(detailMore, new LinearLayout.LayoutParams(0, Ui.dpi(c, 44), 1f));
         bpage.addView(bfoot, Ui.lp(-1, -2, Ui.dpi(c, 12)));
         btScroll.addView(bpage);
         btScroll.setVisibility(GONE);
@@ -336,10 +341,13 @@ final class ControlPanel extends FrameLayout {
         body.addView(pair(c, wifi, data), Ui.lp(-1, Ui.dpi(c, 64)));
         body.addView(pair(c, bluetooth, torch), Ui.lp(-1, Ui.dpi(c, 64), Ui.dpi(c, 8)));
         // tap switches it right here; long-press opens the network list
-        wifi.setOnClickListener(v -> systemToggle("Wi-Fi", wifi, new Intent(Settings.Panel.ACTION_WIFI)));
-        wifi.setOnLongClickListener(v -> { open(new Intent(Settings.Panel.ACTION_WIFI)); return true; });
+        // like the system's tiles: the round icon switches it, the rest of the tile opens its page
+        wifi.setOnClickListener(v -> openDetail(true));
+        wifi.icon.setOnClickListener(v -> systemToggle("Wi-Fi", wifi, null));
+        wifi.setOnLongClickListener(v -> { open(new Intent(Settings.ACTION_WIFI_SETTINGS)); return true; });
         // on: show paired devices here; off: Android's one-tap "turn on" prompt. Long-press: settings
-        bluetooth.setOnClickListener(v -> { if (btOn()) slideTo(BT); else systemToggle("Bluetooth", bluetooth, null); });
+        bluetooth.setOnClickListener(v -> openDetail(false));
+        bluetooth.icon.setOnClickListener(v -> systemToggle("Bluetooth", bluetooth, null));
         bluetooth.setOnLongClickListener(v -> { open(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); return true; });
         data.setOnClickListener(v -> systemToggle("Mobile data", data, new Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)));
         data.setOnLongClickListener(v -> { open(new Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)); return true; });
@@ -488,8 +496,12 @@ final class ControlPanel extends FrameLayout {
         saver.setOnLongClickListener(v -> { open(new Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS)); return true; });
         screenshot.setOnClickListener(v -> closeThen(380, () -> host.globalAction(AccessibilityService.GLOBAL_ACTION_TAKE_SCREENSHOT)));
         record.setOnClickListener(v -> {
-            boolean was = Recorder.recording;
-            closeThen(was ? 0 : 300, () -> Recorder.toggle(getContext()));
+            if (Recorder.recording) { closeThen(0, () -> Recorder.toggle(getContext())); return; }
+            // the phone's own recorder: no "start recording?" pop-up, and it records sound
+            close();
+            main.postDelayed(() -> host.pressTile("Screen Recorder", ok -> {
+                if (!ok) Recorder.toggle(getContext());
+            }), 320);
         });
         Recorder.onChange = recorderListener;
         cast.setOnClickListener(v -> open(new Intent(Settings.ACTION_CAST_SETTINGS)));
@@ -651,7 +663,7 @@ final class ControlPanel extends FrameLayout {
         // Honor's power saving is its own mode (SmartModeStatus 4), not always Android's battery saver
         safe(() -> saver.setActive(((PowerManager) c.getSystemService(Context.POWER_SERVICE)).isPowerSaveMode()
                 || Settings.System.getInt(c.getContentResolver(), "SmartModeStatus", 1) == 4));
-        record.setActive(Recorder.recording);
+        record.setActive(Recorder.recording || honorRecording());
         safe(this::bindMedia);
     }
 
@@ -1008,15 +1020,49 @@ final class ControlPanel extends FrameLayout {
         else if (button instanceof Item) ((Item) button).flip();
         if (button != null) button.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
         host.pressTile(label, ok -> {
-            if (!ok) {
-                if (fallback != null) open(fallback);
-                else if ("Bluetooth".equals(label)) requestBt(!btOn());
-            }
+            // no surprise pop-ups: if the switch couldn't be reached, say so; the readback below
+            // then shows the real state (long-press still opens the full settings page)
+            if (!ok) say("Couldn't switch " + label + ". Try again");
             // read the real state back as the system acts; a reading that still disagrees with the
             // tap is ignored until HOLD_MS, then the last one shows the truth (e.g. a failed switch)
             for (long t : new long[]{400, 900, 1600, HOLD_MS + 100}) main.postDelayed(this::refreshStates, t);
         });
     }
+
+    /** The phone's own screen recorder is running (it shows an ongoing notification while it does). */
+    private static boolean honorRecording() {
+        for (android.service.notification.StatusBarNotification sb : NotifService.list)
+            if ("com.hihonor.screenrecorder".equals(sb.getPackageName())) return true;
+        return false;
+    }
+
+    private TextView message;
+
+    /** A short message near the bottom of the panel (instead of opening anything). */
+    void say(String text) {
+        Context c = getContext();
+        if (message == null) {
+            message = Ui.text(c, "", 13.5f, Ui.FG, true);
+            message.setGravity(Gravity.CENTER);
+            message.setPadding(Ui.dpi(c, 18), Ui.dpi(c, 10), Ui.dpi(c, 18), Ui.dpi(c, 10));
+            message.setBackground(Ui.glass(Ui.dark ? 0xF0303030 : 0xF0FFFFFF, Ui.dp(c, 20)));
+            LayoutParams lp = new LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+            lp.bottomMargin = clearReserve + Ui.dpi(c, 8);
+            addView(message, lp);
+        }
+        message.setText(text);
+        message.animate().cancel();
+        message.setAlpha(0f);
+        message.setVisibility(VISIBLE);
+        message.animate().alpha(1f).setDuration(160).start();
+        main.removeCallbacks(hideMessage);
+        main.postDelayed(hideMessage, 2600);
+    }
+
+    private final Runnable hideMessage = () -> {
+        if (message != null) message.animate().alpha(0f).setDuration(200)
+                .withEndAction(() -> message.setVisibility(GONE)).start();
+    };
 
     /** Re-read every control's state without disturbing the page or scroll position. */
     static final long HOLD_MS = 2600;
@@ -1047,7 +1093,9 @@ final class ControlPanel extends FrameLayout {
         android.bluetooth.BluetoothProfile.ServiceListener l = new android.bluetooth.BluetoothProfile.ServiceListener() {
             @Override public void onServiceConnected(int profile, android.bluetooth.BluetoothProfile proxy) {
                 btProfiles.put(profile, proxy);
-                if (page == BT) buildBt();
+                // who's connected is only known now: let the first order use it (before any tap)
+                if (btBusy == null && !detailWifi) rowOrder.clear();
+                if (page == BT && !detailWifi) buildBt();
             }
             @Override public void onServiceDisconnected(int profile) { btProfiles.remove(profile); }
         };
@@ -1055,6 +1103,156 @@ final class ControlPanel extends FrameLayout {
                 android.bluetooth.BluetoothProfile.HEARING_AID, 22 /* LE_AUDIO */};
         for (int pr : profiles) try { a.getProfileProxy(getContext(), l, pr); } catch (Exception ignored) {}
     }
+
+    /** Rows keep their places while a page is open (sorted once, when it opens). */
+    private final List<String> rowOrder = new java.util.ArrayList<>();
+
+    private void keepOrder(List<String> keys) {
+        java.util.List<String> fresh = new java.util.ArrayList<>(keys);
+        if (rowOrder.isEmpty()) { rowOrder.addAll(fresh); return; }
+        for (String k : fresh) if (!rowOrder.contains(k)) rowOrder.add(k); // new ones at the end
+        keys.clear();
+        for (String k : rowOrder) if (fresh.contains(k)) keys.add(k);
+    }
+
+    private void openDetail(boolean wifiPage) {
+        if (detailWifi != wifiPage || page != BT) rowOrder.clear();
+        detailWifi = wifiPage;
+        if (page == BT) buildDetail();
+        slideTo(BT);
+    }
+
+    private void buildDetail() {
+        detailTitle.setText(detailWifi ? "Wi-Fi" : "Bluetooth");
+        detailMore.setText(detailWifi ? "More Wi-Fi settings" : "Pair a new device");
+        if (detailWifi) buildWifi(); else buildBt();
+    }
+
+    // ---------------------------------------------------------------- Wi-Fi
+
+    private String connecting; // the network being joined right now
+    private long lastScan;
+
+    private boolean wifiOn() {
+        WifiManager wm = (WifiManager) getContext().getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+        return wm != null && wm.isWifiEnabled();
+    }
+
+    private String connectedSsid() {
+        try {
+            WifiManager wm = (WifiManager) getContext().getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            String s = wm.getConnectionInfo().getSSID();
+            if (s == null || s.contains("unknown ssid")) return null;
+            return s.replace("\"", "");
+        } catch (Exception e) { return null; }
+    }
+
+    /** Nearby networks, strongest first, the one you're on at the top; tap one to join it. */
+    private void buildWifi() {
+        Context c = getContext();
+        boolean on = wifiOn();
+        btToggle.setText(on ? "On" : "Off");
+        btToggle.setTextColor(on ? Color.WHITE : Ui.FG);
+        btToggle.setBackground(Ui.glass(on ? Ui.ACCENT : TILE, Ui.dp(c, 18)));
+        btList.removeAllViews();
+        if (!on) { btList.addView(btMessage(c, "Wi-Fi is off")); return; }
+        WifiManager wm = (WifiManager) c.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+        if (SystemClock.uptimeMillis() - lastScan > 20_000) {
+            lastScan = SystemClock.uptimeMillis();
+            try { wm.startScan(); } catch (Exception ignored) {}
+            main.postDelayed(() -> { if (page == BT && detailWifi && progress > 0f) buildWifi(); }, 3500);
+        }
+        List<android.net.wifi.ScanResult> results;
+        try { results = wm.getScanResults(); } catch (SecurityException e) { results = null; }
+        if (results == null) {
+            btList.addView(btMessage(c, "Allow precise location for Fast Launcher to list networks here"));
+            return;
+        }
+        final String current = connectedSsid();
+        java.util.LinkedHashMap<String, android.net.wifi.ScanResult> best = new java.util.LinkedHashMap<>();
+        for (android.net.wifi.ScanResult sr : results) {
+            String name = sr.SSID;
+            if (name == null || name.trim().isEmpty()) continue;
+            android.net.wifi.ScanResult had = best.get(name);
+            if (had == null || sr.level > had.level) best.put(name, sr);
+        }
+        List<android.net.wifi.ScanResult> list = new java.util.ArrayList<>(best.values());
+        java.util.Collections.sort(list, (a, b) -> {
+            boolean ca = a.SSID.equals(current), cb = b.SSID.equals(current);
+            if (ca != cb) return ca ? -1 : 1;
+            return Integer.compare(b.level, a.level);
+        });
+        java.util.List<String> keys = new java.util.ArrayList<>();
+        for (android.net.wifi.ScanResult sr : list) keys.add(sr.SSID);
+        keepOrder(keys);
+        java.util.Map<String, android.net.wifi.ScanResult> byName = new java.util.HashMap<>();
+        for (android.net.wifi.ScanResult sr : list) byName.put(sr.SSID, sr);
+        list.clear();
+        for (String k : keys) list.add(byName.get(k));
+        if (list.isEmpty()) { btList.addView(btMessage(c, "Looking for networks\u2026")); return; }
+        int shown = 0;
+        for (final android.net.wifi.ScanResult sr : list) {
+            if (shown++ == 12) break;
+            final boolean here = sr.SSID.equals(current), joining = sr.SSID.equals(connecting);
+            boolean locked = sr.capabilities != null && (sr.capabilities.contains("WPA") || sr.capabilities.contains("WEP") || sr.capabilities.contains("SAE"));
+            int bars = WifiManager.calculateSignalLevel(sr.level, 4);
+            String sub = here ? "Connected" : joining ? "Connecting\u2026"
+                    : (locked ? "Secured" : "Open") + "  \u00b7  " + new String[]{"weak", "fair", "good", "strong"}[Math.max(0, Math.min(3, bars))];
+            View row = deviceRow(c, PanelIcons.WIFI, sr.SSID, sub, here || joining);
+            row.setOnClickListener(v -> {
+                if (here || connecting != null) return;
+                joinWifi(sr.SSID);
+            });
+            btList.addView(row, Ui.lp(-1, -2, btList.getChildCount() == 0 ? 0 : Ui.dpi(c, 8)));
+        }
+    }
+
+    /** Join a network by tapping it in the system's Wi-Fi list, out of sight. */
+    private void joinWifi(final String ssid) {
+        connecting = ssid;
+        buildWifi();
+        PanelService.pressInSettings(new Intent(Settings.ACTION_WIFI_SETTINGS), ssid, result -> {
+            if (result == PanelService.NEEDS_YOU) {
+                connecting = null;
+                close(); // it wants a password: the system's own box is up, let the user type it
+                return;
+            }
+            if (result == PanelService.NOT_FOUND) say(ssid + " is out of range");
+            // give it a few seconds to connect, then show the truth
+            main.postDelayed(() -> { connecting = null; if (page == BT && detailWifi) buildWifi(); refreshStates(); }, 4000);
+        });
+    }
+
+    /** A row on the Wi-Fi or Bluetooth page: icon, name, a line under it; lit when active. */
+    private View deviceRow(Context c, int iconType, String name, String sub, boolean active) {
+        LinearLayout r = new LinearLayout(c);
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        r.setBackground(Ui.glass(TILE, Ui.dp(c, 22)));
+        int p = Ui.dpi(c, 10);
+        r.setPadding(p, p, Ui.dpi(c, 16), p);
+        PanelIcons icon = new PanelIcons(c, iconType, active ? Color.WHITE : Ui.FG);
+        int ip = Ui.dpi(c, 11);
+        icon.setPadding(ip, ip, ip, ip);
+        icon.setBackground(Ui.glass(active ? Ui.ACCENT : ROUND, Ui.dp(c, 22)));
+        r.addView(icon, Ui.lp(Ui.dpi(c, 44), Ui.dpi(c, 44)));
+        LinearLayout col = new LinearLayout(c);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setPadding(Ui.dpi(c, 12), 0, 0, 0);
+        TextView t = Ui.text(c, name, 14.5f, Ui.FG, true);
+        t.setTypeface(Ui.font(c, 600));
+        t.setSingleLine(true);
+        t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        col.addView(t);
+        col.addView(Ui.text(c, sub, 12, active ? Ui.ACCENT : Ui.FG2, false), Ui.lp(-2, -2, Ui.dpi(c, 2)));
+        r.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
+        r.setClickable(true);
+        Ui.pressable(r);
+        return r;
+    }
+
+    // ---------------------------------------------------------------- Bluetooth
+
+    private String btBusy; // the device being connected/disconnected right now
 
     private void buildBt() {
         Context c = getContext();
@@ -1078,6 +1276,13 @@ final class ControlPanel extends FrameLayout {
             if (cx != cy) return cx ? -1 : 1;
             return String.valueOf(btName(x)).compareToIgnoreCase(String.valueOf(btName(y)));
         });
+        java.util.List<String> keys = new java.util.ArrayList<>();
+        for (android.bluetooth.BluetoothDevice d : devices) keys.add(d.getAddress());
+        keepOrder(keys);
+        java.util.Map<String, android.bluetooth.BluetoothDevice> byAddr = new java.util.HashMap<>();
+        for (android.bluetooth.BluetoothDevice d : devices) byAddr.put(d.getAddress(), d);
+        devices.clear();
+        for (String k : keys) devices.add(byAddr.get(k));
         if (devices.isEmpty()) { btList.addView(btMessage(c, "No paired devices yet")); return; }
         for (android.bluetooth.BluetoothDevice d : devices) {
             boolean connected = btConnected.contains(d.getAddress());
@@ -1103,8 +1308,19 @@ final class ControlPanel extends FrameLayout {
             r.addView(col, new LinearLayout.LayoutParams(0, -2, 1f));
             r.setClickable(true);
             Ui.pressable(r);
-            // connecting is reserved for system apps: Bluetooth settings connects it in one tap
-            r.setOnClickListener(v -> open(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)));
+            // apps may not connect devices themselves: tap it in the system's Bluetooth list, out of sight
+            final String dn = btName(d);
+            if (dn.equals(btBusy)) { ((TextView) col.getChildAt(1)).setText(connected ? "Disconnecting\u2026" : "Connecting\u2026"); }
+            r.setOnClickListener(v -> {
+                if (btBusy != null) return;
+                btBusy = dn;
+                buildBt();
+                PanelService.pressInSettings(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS), dn, "OK", res -> {
+                    if (res == PanelService.NEEDS_YOU) { btBusy = null; close(); return; }
+                    if (res == PanelService.NOT_FOUND) say(dn + " isn't nearby");
+                    main.postDelayed(() -> { btBusy = null; if (page == BT && !detailWifi) buildBt(); }, 3500);
+                });
+            });
             btList.addView(r, Ui.lp(-1, -2, btList.getChildCount() == 0 ? 0 : Ui.dpi(c, 8)));
         }
     }
@@ -1171,7 +1387,7 @@ final class ControlPanel extends FrameLayout {
     /** The card shows one page at a time: the controls, the notifications, or Bluetooth devices. */
     private void showPage(int p) {
         if (p == NOTIFS && notifsDirty) buildNotifs();
-        if (p == BT) buildBt();
+        if (p == BT) buildDetail();
         if (pageAnim != null) pageAnim.cancel();
         for (ScrollView v : new ScrollView[]{scroll, notifScroll, btScroll}) v.setTranslationX(0f);
         if (p != page) {
@@ -1180,7 +1396,7 @@ final class ControlPanel extends FrameLayout {
         }
         page = p;
         resetPageLooks();
-        setIfChanged(time, p == NOTIFS ? "Notifications" : p == BT ? "Bluetooth" : "Controls");
+        setIfChanged(time, p == NOTIFS ? "Notifications" : p == BT ? (detailWifi ? "Wi-Fi" : "Bluetooth") : "Controls");
         scroll.setVisibility(p == CONTROLS ? VISIBLE : GONE);
         notifScroll.setVisibility(p == NOTIFS ? VISIBLE : GONE);
         btScroll.setVisibility(p == BT ? VISIBLE : GONE);

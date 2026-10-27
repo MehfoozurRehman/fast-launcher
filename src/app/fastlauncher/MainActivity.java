@@ -197,6 +197,11 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 return;
             }
             if ("tiles".equals(what)) { PanelService.dumpSystemTiles(); return; }
+            if (what != null && what.startsWith("wifi:")) { // adb test: connect via settings
+                PanelService.pressInSettings(new Intent(Settings.ACTION_WIFI_SETTINGS), what.substring(5),
+                        r -> Diag.log("wifi connect result " + r));
+                return;
+            }
             if (what != null && what.startsWith("tile:")) {
                 PanelService.pressSystemTile(what.substring(5), ok -> Diag.log("tile result " + ok));
                 return;
