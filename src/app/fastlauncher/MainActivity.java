@@ -344,6 +344,8 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
      */
     private void settleHome() {
         if (root == null) return;
+        // already on its way somewhere (Home's close runs just before this): let it finish
+        if (root.animating()) return;
         float p = root.progress;
         if (p > 0f && p < 1f) root.snapTo(p >= 0.5f ? 1f : 0f);   // never left half way
         else root.snapTo(p);                                       // re-applies looks, drops layers
@@ -1609,7 +1611,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             if (blurView.hasBlur() && blurView.getVisibility() != View.VISIBLE) blurView.setVisibility(View.VISIBLE);
             // the sheet travels a third of the screen while the rows cascade in behind it
             float e = 1f - progress;
-            drawer.setTranslationY(e * travel() * 0.33f);
+            drawer.setTranslationY(e * travel() * 0.33f - over);
             drawer.setAlpha(Math.min(1f, progress * 2.2f));
             blurView.setAlpha(Math.min(1f, progress * 1.6f));
             float ha = 1f - Math.min(1f, progress * 1.7f);
@@ -1621,8 +1623,31 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             home.setScaleY(sc);
         }
 
+        /** Pushed up past fully open: the drawer gives a little (pixels), then springs back. */
+        private float over;
+        private ValueAnimator overAnim;
+
+        private void setOver(float px) {
+            if (overAnim != null) overAnim.cancel();
+            over = px;
+            if (progress > 0f) drawer.setTranslationY((1f - progress) * travel() * 0.33f - over);
+        }
+
+        private void releaseOver() {
+            if (over == 0f || (overAnim != null && overAnim.isRunning())) return;
+            overAnim = ValueAnimator.ofFloat(over, 0f);
+            overAnim.setDuration(320);
+            overAnim.setInterpolator(Ui.EMPHASIZED);
+            overAnim.addUpdateListener(a -> {
+                over = (Float) a.getAnimatedValue();
+                if (progress > 0f) drawer.setTranslationY((1f - progress) * travel() * 0.33f - over);
+            });
+            overAnim.start();
+        }
+
         void snapTo(float p) {
             if (anim != null) anim.cancel();
+            setOver(0f);
             setProgress(p);
             endLayers();
         }
@@ -1632,6 +1657,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         /** velocity: px/s toward the target. A flick finishes fast; a gentle release eases in. */
         void animateTo(final float target, float velocity) {
             if (anim != null) anim.cancel();
+            releaseOver();
             if (target == 0f && searching) endSearch();
             float dist = Math.abs(target - progress);
             if (dist < 0.002f) { setProgress(target); endLayers(); return; }
@@ -1753,7 +1779,11 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                     if (!dragging && (Math.abs(ev.getY() - downY) > slop || Math.abs(ev.getX() - downX) > slop))
                         removeCallbacks(homeLongPress);
                     if (!dragging) maybeStartDrag(ev);
-                    if (dragging) setProgress(startProgress + distanceFor(downY - ev.getY()));
+                    if (dragging) {
+                        float p = startProgress + distanceFor(downY - ev.getY());
+                        setProgress(p);
+                        setOver(p > 1f ? Ui.rubber((p - 1f) * travel() * 0.45f, dpi(70)) : 0f);
+                    }
                     return true;
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:

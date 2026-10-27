@@ -91,7 +91,8 @@ final class ControlPanel extends FrameLayout {
     private int pagingTo = -1;
     private ValueAnimator pageAnim;
     private final LinearLayout btList;
-    private final TextView btToggle;
+    private final Ui.Toggle btToggle;
+    private long switchedAt; // the page's switch was just flipped: hold it while the phone catches up
     final boolean isDark = Ui.dark; // the palette this panel was built in
     final int builtAccent = Ui.ACCENT;
     private final FrameLayout scrim;
@@ -225,7 +226,7 @@ final class ControlPanel extends FrameLayout {
 
         scroll = new ScrollView(c);
         scroll.setVerticalScrollBarEnabled(false);
-        scroll.setOverScrollMode(OVER_SCROLL_NEVER);
+        scroll.setOverScrollMode(OVER_SCROLL_ALWAYS); // stretches at either end, short or long
         LinearLayout body = new LinearLayout(c);
         body.setOrientation(LinearLayout.VERTICAL);
         int pad = Ui.dpi(c, 12);
@@ -242,7 +243,7 @@ final class ControlPanel extends FrameLayout {
         // ---- the notifications page (swapped in for the controls)
         notifScroll = new ScrollView(c);
         notifScroll.setVerticalScrollBarEnabled(false);
-        notifScroll.setOverScrollMode(OVER_SCROLL_NEVER);
+        notifScroll.setOverScrollMode(OVER_SCROLL_ALWAYS); // stretches at either end, short or long
         LinearLayout npage = new LinearLayout(c);
         npage.setOrientation(LinearLayout.VERTICAL);
         npage.setPadding(pad, 0, pad, Ui.dpi(c, 4));
@@ -293,7 +294,7 @@ final class ControlPanel extends FrameLayout {
         // ---- the Bluetooth page
         btScroll = new ScrollView(c);
         btScroll.setVerticalScrollBarEnabled(false);
-        btScroll.setOverScrollMode(OVER_SCROLL_NEVER);
+        btScroll.setOverScrollMode(OVER_SCROLL_ALWAYS); // stretches at either end, short or long
         LinearLayout bpage = new LinearLayout(c);
         bpage.setOrientation(LinearLayout.VERTICAL);
         bpage.setPadding(pad, 0, pad, Ui.dpi(c, 4));
@@ -312,17 +313,16 @@ final class ControlPanel extends FrameLayout {
         btitle.setPadding(Ui.dpi(c, 12), 0, 0, 0);
         btitle.setVisibility(INVISIBLE); // the header already names the page
         bhead.addView(btitle, new LinearLayout.LayoutParams(0, -2, 1f));
-        btToggle = Ui.text(c, "On", 13.5f, Color.WHITE, true);
-        btToggle.setTypeface(Ui.font(c, 600));
-        btToggle.setGravity(Gravity.CENTER);
-        btToggle.setPadding(Ui.dpi(c, 18), 0, Ui.dpi(c, 18), 0);
-        btToggle.setClickable(true);
-        Ui.pressable(btToggle);
-        btToggle.setOnClickListener(v -> systemToggle(detailWifi ? "Wi-Fi" : "Bluetooth", null, null));
-        bhead.addView(btToggle, Ui.lp(-2, Ui.dpi(c, 36)));
+        // a real switch: it slides when tapped and holds while the phone does it
+        btToggle = new Ui.Toggle(c, true);
+        btToggle.setListener(this::onDetailSwitch);
+        LinearLayout.LayoutParams tgp = Ui.lp(-2, -2);
+        tgp.rightMargin = Ui.dpi(c, 6);
+        bhead.addView(btToggle, tgp);
         bpage.addView(bhead, Ui.lp(-1, -2));
         btList = new LinearLayout(c);
         btList.setOrientation(LinearLayout.VERTICAL);
+        btList.setLayoutTransition(Ui.rows()); // rows fade in and out as it turns on and off
         bpage.addView(btList, Ui.lp(-1, -2, Ui.dpi(c, 12)));
         LinearLayout bfoot = new LinearLayout(c);
         detailMore = pill(c, "More Bluetooth settings", () -> open(new Intent(detailWifi
@@ -340,17 +340,12 @@ final class ControlPanel extends FrameLayout {
         torch = new Item(c, PanelIcons.TORCH, "Torch");
         body.addView(pair(c, wifi, data), Ui.lp(-1, Ui.dpi(c, 64)));
         body.addView(pair(c, bluetooth, torch), Ui.lp(-1, Ui.dpi(c, 64), Ui.dpi(c, 8)));
-        // tap switches it right here; long-press opens the network list
-        // like the system's tiles: the round icon switches it, the rest of the tile opens its page
-        wifi.setOnClickListener(v -> openDetail(true));
-        wifi.icon.setOnClickListener(v -> systemToggle("Wi-Fi", wifi, null));
-        wifi.setOnLongClickListener(v -> { open(new Intent(Settings.ACTION_WIFI_SETTINGS)); return true; });
-        // on: show paired devices here; off: Android's one-tap "turn on" prompt. Long-press: settings
-        bluetooth.setOnClickListener(v -> openDetail(false));
-        bluetooth.icon.setOnClickListener(v -> systemToggle("Bluetooth", bluetooth, null));
-        bluetooth.setOnLongClickListener(v -> { open(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); return true; });
+        // tap switches it right here; long-press opens our own page (networks / devices)
+        wifi.setOnClickListener(v -> systemToggle("Wi-Fi", wifi, null));
+        wifi.setOnLongClickListener(v -> { openDetail(true); return true; });
+        bluetooth.setOnClickListener(v -> systemToggle("Bluetooth", bluetooth, null));
+        bluetooth.setOnLongClickListener(v -> { openDetail(false); return true; });
         data.setOnClickListener(v -> systemToggle("Mobile data", data, new Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)));
-        data.setOnLongClickListener(v -> { open(new Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)); return true; });
         torch.setOnClickListener(v -> safe(this::toggleTorch));
 
         // ---- media (half the width) beside the two sliders, all in one row
@@ -480,20 +475,18 @@ final class ControlPanel extends FrameLayout {
         grid.saved = ids -> prefs.edit().putString("order", ids).apply();
         body.addView(grid, Ui.lp(-1, -2, Ui.dpi(c, 10)));
 
-        // these switch in place by pressing the phone's own tile out of sight; long-press: settings
+        // these switch in place by pressing the phone's own tile out of sight; long-press lifts
+        // them to rearrange like the rest (the full settings are behind "Original")
         hotspot.setOnClickListener(v -> systemToggle("Hotspot", hotspot, new Intent(Settings.ACTION_WIRELESS_SETTINGS)));
-        hotspot.setOnLongClickListener(v -> { open(new Intent(Settings.ACTION_WIRELESS_SETTINGS)); return true; });
         rotate.setOnClickListener(v -> safe(this::toggleRotation));
         plane.setOnClickListener(v -> systemToggle("Aeroplane mode", plane, new Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS)));
         location.setOnClickListener(v -> systemToggle("Location", location, new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)));
-        location.setOnLongClickListener(v -> { open(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)); return true; });
         // Honor's dark-mode screen isn't open to other apps; its switch lives in Display settings
         dark.setOnClickListener(v -> systemToggle("Dark mode", dark, new Intent(Settings.ACTION_DISPLAY_SETTINGS)));
         dnd.setOnClickListener(v -> safe(this::toggleDnd));
         sound.setOnClickListener(v -> safe(this::cycleSound));
         eye.setOnClickListener(v -> systemToggle("Eye Comfort", eye, new Intent(Settings.ACTION_DISPLAY_SETTINGS)));
         saver.setOnClickListener(v -> systemToggle("Power Saving", saver, new Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS)));
-        saver.setOnLongClickListener(v -> { open(new Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS)); return true; });
         screenshot.setOnClickListener(v -> closeThen(380, () -> host.globalAction(AccessibilityService.GLOBAL_ACTION_TAKE_SCREENSHOT)));
         record.setOnClickListener(v -> {
             if (Recorder.recording) { closeThen(0, () -> Recorder.toggle(getContext())); return; }
@@ -1019,7 +1012,11 @@ final class ControlPanel extends FrameLayout {
         if (button instanceof Round) ((Round) button).flip();
         else if (button instanceof Item) ((Item) button).flip();
         if (button != null) button.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+        final java.util.function.BooleanSupplier now = "Wi-Fi".equals(label) ? this::wifiOn
+                : "Bluetooth".equals(label) ? this::btOn : null;
+        final boolean want = now != null && !now.getAsBoolean();
         host.pressTile(label, ok -> {
+            if (ok && now != null) checkSwitched(label, now, want, SystemClock.uptimeMillis());
             // no surprise pop-ups: if the switch couldn't be reached, say so; the readback below
             // then shows the real state (long-press still opens the full settings page)
             if (!ok) say("Couldn't switch " + label + ". Try again");
@@ -1027,6 +1024,31 @@ final class ControlPanel extends FrameLayout {
             // tap is ignored until HOLD_MS, then the last one shows the truth (e.g. a failed switch)
             for (long t : new long[]{400, 900, 1600, HOLD_MS + 100}) main.postDelayed(this::refreshStates, t);
         });
+    }
+
+    /**
+     * The phone's tile ignores a press while the radio is still settling (e.g. Bluetooth a moment
+     * after it was turned on). Once it has settled the other way, press it once more.
+     */
+    private void checkSwitched(String label, java.util.function.BooleanSupplier now, boolean want, long since) {
+        main.postDelayed(() -> {
+            if (now.getAsBoolean() == want) return;
+            if (settling(label)) { if (SystemClock.uptimeMillis() - since < 4000) checkSwitched(label, now, want, since); return; }
+            Diag.log("'" + label + "' didn't switch; pressing again");
+            host.pressTile(label, ok -> { for (long t : new long[]{400, 1200}) main.postDelayed(this::refreshStates, t); });
+        }, SystemClock.uptimeMillis() - since < 100 ? 1000 : 350); // give the first press time to take
+    }
+
+    /** Wi-Fi or Bluetooth is half-way through turning on or off. */
+    private boolean settling(String label) {
+        try {
+            if ("Bluetooth".equals(label)) {
+                int st = btAdapter().getState();
+                return st == android.bluetooth.BluetoothAdapter.STATE_TURNING_ON || st == android.bluetooth.BluetoothAdapter.STATE_TURNING_OFF;
+            }
+            int st = ((WifiManager) getContext().getApplicationContext().getSystemService(Context.WIFI_SERVICE)).getWifiState();
+            return st == WifiManager.WIFI_STATE_ENABLING || st == WifiManager.WIFI_STATE_DISABLING;
+        } catch (Exception e) { return false; }
     }
 
     /** The phone's own screen recorder is running (it shows an ongoing notification while it does). */
@@ -1115,6 +1137,33 @@ final class ControlPanel extends FrameLayout {
         for (String k : rowOrder) if (fresh.contains(k)) keys.add(k);
     }
 
+    private String rowsSig;
+
+    /**
+     * The rows already show exactly this: leave them (a rebuild makes the list blink). Otherwise
+     * clear them, ready for the caller to add the new ones.
+     */
+    private boolean sameRows(String sig) {
+        if (sig.equals(rowsSig) && btList.getChildCount() > 0) return true;
+        rowsSig = sig;
+        btList.removeAllViews();
+        return false;
+    }
+
+    private void onDetailSwitch(int v) {
+        switchedAt = SystemClock.uptimeMillis();
+        rowsSig = null;
+        btList.removeAllViews();
+        btList.addView(btMessage(getContext(), v == 1 ? "Turning on…" : "Turning off…"));
+        systemToggle(detailWifi ? "Wi-Fi" : "Bluetooth", detailWifi ? wifi : bluetooth, null);
+    }
+
+    /** Just flipped: readings that still show the old state are the phone catching up. */
+    private boolean holdingSwitch() {
+        boolean on = detailWifi ? wifiOn() : btOn();
+        return SystemClock.uptimeMillis() - switchedAt < HOLD_MS && on != btToggle.isOn();
+    }
+
     private void openDetail(boolean wifiPage) {
         if (detailWifi != wifiPage || page != BT) rowOrder.clear();
         detailWifi = wifiPage;
@@ -1151,11 +1200,9 @@ final class ControlPanel extends FrameLayout {
     private void buildWifi() {
         Context c = getContext();
         boolean on = wifiOn();
-        btToggle.setText(on ? "On" : "Off");
-        btToggle.setTextColor(on ? Color.WHITE : Ui.FG);
-        btToggle.setBackground(Ui.glass(on ? Ui.ACCENT : TILE, Ui.dp(c, 18)));
-        btList.removeAllViews();
-        if (!on) { btList.addView(btMessage(c, "Wi-Fi is off")); return; }
+        if (holdingSwitch()) return;
+        btToggle.setOn(on, true);
+        if (!on) { if (!sameRows("w:off")) btList.addView(btMessage(c, "Wi-Fi is off")); return; }
         WifiManager wm = (WifiManager) c.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         if (SystemClock.uptimeMillis() - lastScan > 20_000) {
             lastScan = SystemClock.uptimeMillis();
@@ -1165,7 +1212,7 @@ final class ControlPanel extends FrameLayout {
         List<android.net.wifi.ScanResult> results;
         try { results = wm.getScanResults(); } catch (SecurityException e) { results = null; }
         if (results == null) {
-            btList.addView(btMessage(c, "Allow precise location for Fast Launcher to list networks here"));
+            if (!sameRows("w:perm")) btList.addView(btMessage(c, "Allow precise location for Fast Launcher to list networks here"));
             return;
         }
         final String current = connectedSsid();
@@ -1189,6 +1236,9 @@ final class ControlPanel extends FrameLayout {
         for (android.net.wifi.ScanResult sr : list) byName.put(sr.SSID, sr);
         list.clear();
         for (String k : keys) list.add(byName.get(k));
+        StringBuilder sig = new StringBuilder("w:").append(current).append(connecting);
+        for (android.net.wifi.ScanResult sr : list) sig.append('|').append(sr.SSID).append(WifiManager.calculateSignalLevel(sr.level, 4));
+        if (sameRows(sig.toString())) return;
         if (list.isEmpty()) { btList.addView(btMessage(c, "Looking for networks\u2026")); return; }
         int shown = 0;
         for (final android.net.wifi.ScanResult sr : list) {
@@ -1257,16 +1307,14 @@ final class ControlPanel extends FrameLayout {
     private void buildBt() {
         Context c = getContext();
         boolean on = btOn();
-        btToggle.setText(on ? "On" : "Off");
-        btToggle.setTextColor(on ? Color.WHITE : Ui.FG);
-        btToggle.setBackground(Ui.glass(on ? Ui.ACCENT : TILE, Ui.dp(c, 18)));
-        btList.removeAllViews();
-        if (!on) { btList.addView(btMessage(c, "Bluetooth is off")); return; }
+        if (holdingSwitch()) return;
+        btToggle.setOn(on, true);
+        if (!on) { if (!sameRows("b:off")) btList.addView(btMessage(c, "Bluetooth is off")); return; }
         java.util.List<android.bluetooth.BluetoothDevice> devices = new java.util.ArrayList<>();
         try {
             devices.addAll(btAdapter().getBondedDevices());
         } catch (SecurityException e) {
-            btList.addView(btMessage(c, "Allow \u201CNearby devices\u201D for Fast Launcher to list them here"));
+            if (!sameRows("b:perm")) btList.addView(btMessage(c, "Allow \u201CNearby devices\u201D for Fast Launcher to list them here"));
             return;
         }
         watchBtProfiles();
@@ -1283,6 +1331,9 @@ final class ControlPanel extends FrameLayout {
         for (android.bluetooth.BluetoothDevice d : devices) byAddr.put(d.getAddress(), d);
         devices.clear();
         for (String k : keys) devices.add(byAddr.get(k));
+        StringBuilder sig = new StringBuilder("b:").append(btBusy);
+        for (android.bluetooth.BluetoothDevice d : devices) sig.append('|').append(d.getAddress()).append(btConnected.contains(d.getAddress()));
+        if (sameRows(sig.toString())) return;
         if (devices.isEmpty()) { btList.addView(btMessage(c, "No paired devices yet")); return; }
         for (android.bluetooth.BluetoothDevice d : devices) {
             boolean connected = btConnected.contains(d.getAddress());
@@ -2093,14 +2144,8 @@ final class ControlPanel extends FrameLayout {
         progress = Math.max(0f, Math.min(1f, p));
         // the card stays where it lands: it fades in, drifting down a little and settling to full
         // size, like the system's own panel (sliding the whole card down showed its bottom first)
-        float d = Ui.dp(getContext(), 1);
-        card.setTranslationY(-(1f - progress) * 56 * d);
         card.setAlpha(Math.min(1f, progress * 1.6f));
-        float sc = 0.94f + 0.06f * progress;
-        card.setPivotX(card.getWidth() / 2f);
-        card.setPivotY(0f);
-        card.setScaleX(sc);
-        card.setScaleY(sc);
+        layCard();
         scrim.setAlpha(progress);
         statusRow.setAlpha(progress);
         // Clear all rises from the bottom as the panel comes down
@@ -2110,11 +2155,46 @@ final class ControlPanel extends FrameLayout {
         dots.setTranslationY((1f - progress) * Ui.dp(getContext(), 24));
     }
 
+    /** Pulled past where it stops: the card gives a little, stretching down (pixels). */
+    private float stretch;
+    private ValueAnimator stretchAnim;
+
+    private void layCard() {
+        float d = Ui.dp(getContext(), 1);
+        float sc = 0.94f + 0.06f * progress;
+        card.setPivotX(card.getWidth() / 2f);
+        card.setPivotY(0f);
+        card.setScaleX(sc);
+        // half the give moves it, half stretches it, so its bottom edge follows the finger
+        card.setScaleY(sc + (card.getHeight() > 0 ? stretch * 0.5f / card.getHeight() : 0f));
+        card.setTranslationY(-(1f - progress) * 56 * d + stretch * 0.5f);
+    }
+
+    private void setStretch(float px) {
+        if (stretchAnim != null) stretchAnim.cancel();
+        stretch = px;
+        layCard();
+    }
+
+    /** Pull `over` pixels past the end: rubber band. */
+    private void overPull(float over) { setStretch(Ui.rubber(Math.max(0f, over), Ui.dp(getContext(), 110))); }
+
+    /** Let go: the card springs back to its place. */
+    private void releaseStretch() {
+        if (stretch == 0f || (stretchAnim != null && stretchAnim.isRunning())) return;
+        stretchAnim = ValueAnimator.ofFloat(stretch, 0f);
+        stretchAnim.setDuration(Math.round(260 + stretch / Ui.dp(getContext(), 1)));
+        stretchAnim.setInterpolator(Ui.EMPHASIZED);
+        stretchAnim.addUpdateListener(a -> { stretch = (Float) a.getAnimatedValue(); layCard(); });
+        stretchAnim.start();
+    }
+
     /** Follow a pull from the status bar: dy is how far the finger has come down. */
     void dragFromTop(float dy) {
         if (anim != null) anim.cancel();
         boolean was = progress > 0f;
         setProgress(dy / cardTravel());
+        overPull(dy - cardTravel());
         if (!was && progress > 0f && controller != null) tickProgress.run();
         armWatchdog();
     }
@@ -2167,6 +2247,7 @@ final class ControlPanel extends FrameLayout {
 
     void animateTo(final float target, float velocity) {
         if (anim != null) anim.cancel();
+        releaseStretch();
         animTarget = target;
         float dist = Math.abs(target - progress);
         long dur = Math.round(150 + 170 * dist);
@@ -2213,6 +2294,8 @@ final class ControlPanel extends FrameLayout {
                 topPull = downY < card.getTop() + head.getBottom() + Ui.dp(getContext(), 20);
                 topPulling = false;
                 reopening = false;
+                stretching = false;
+                releaseStretch(); // a gesture cut off mid-stretch never leaves it stretched
                 if (vt != null) vt.recycle();
                 vt = VelocityTracker.obtain();
                 vt.addMovement(e);
@@ -2243,6 +2326,12 @@ final class ControlPanel extends FrameLayout {
                     }
                     return true;
                 }
+                // pulling down on a page already at its top: it stretches and springs back
+                if (dy > slop && dy > Math.abs(dx) && !pageScroll().canScrollVertically(-1)) {
+                    stretching = true;
+                    downY = e.getRawY() - slop;
+                    return true;
+                }
                 if (dy < -slop && Math.abs(dy) > Math.abs(dx) && !pageScroll().canScrollVertically(1)) {
                     dragging = true;
                     downY = e.getRawY();
@@ -2271,7 +2360,7 @@ final class ControlPanel extends FrameLayout {
         return false;
     }
 
-    private boolean topPull, topPulling, reopening;
+    private boolean topPull, topPulling, reopening, stretching;
     private LinearLayout head;
     private int dropTo = -1;
     private ValueAnimator dropAnim;
@@ -2341,7 +2430,9 @@ final class ControlPanel extends FrameLayout {
             if (vt != null) vt.addMovement(e);
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_MOVE:
-                    setProgress(startProgress + Math.max(0f, e.getRawY() - downY) / cardTravel());
+                    float pulled = startProgress * cardTravel() + Math.max(0f, e.getRawY() - downY);
+                    setProgress(pulled / cardTravel());
+                    overPull(pulled - cardTravel());
                     return true;
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
@@ -2355,14 +2446,22 @@ final class ControlPanel extends FrameLayout {
             return true;
         }
         armWatchdog();
+        if (stretching) {
+            int a = e.getActionMasked();
+            if (a == MotionEvent.ACTION_MOVE) overPull(e.getRawY() - downY);
+            else if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) { stretching = false; releaseStretch(); }
+            return true;
+        }
         if (topPulling) { // the rest of a top pull is ours; it never closes the panel
             if (vt != null) vt.addMovement(e);
             int a = e.getActionMasked();
             float f = Math.max(0f, Math.min(1f, (e.getRawY() - downY) / Ui.dp(getContext(), 220)));
             if (a == MotionEvent.ACTION_MOVE) {
                 if (dropTo >= 0) layDrop(f);
+                else overPull(e.getRawY() - downY); // this side is already showing: it just gives
             } else if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) {
                 topPulling = false;
+                releaseStretch();
                 float vy = 0;
                 if (vt != null) { vt.computeCurrentVelocity(1000); vy = vt.getYVelocity(); vt.recycle(); vt = null; }
                 if (dropTo >= 0) settleDrop(f, a == MotionEvent.ACTION_UP && (f > 0.35f || vy > 900));
@@ -2377,7 +2476,7 @@ final class ControlPanel extends FrameLayout {
                 case MotionEvent.ACTION_MOVE:
                     if (pagingTo >= 0 && pagingTo != to) pageView(pagingTo).setVisibility(GONE);
                     pagingTo = to;
-                    layPages(page, to, to < 0 ? dx * 0.2f : dx); // no page that way: just give a little
+                    layPages(page, to, to < 0 ? Ui.rubber(dx, Ui.dp(getContext(), 60)) : dx); // no page that way: it gives, less and less
                     return true;
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL: {
@@ -2387,7 +2486,7 @@ final class ControlPanel extends FrameLayout {
                     float w = Math.max(1, pager.getWidth());
                     boolean commit = to >= 0 && e.getActionMasked() == MotionEvent.ACTION_UP
                             && (Math.abs(dx) > w * 0.3f || (Math.abs(vx) > 800 && Math.signum(vx) == Math.signum(dx)));
-                    animatePages(page, to, to < 0 ? dx * 0.2f : dx, commit, vx);
+                    animatePages(page, to, to < 0 ? Ui.rubber(dx, Ui.dp(getContext(), 60)) : dx, commit, vx);
                     return true;
                 }
             }
@@ -2485,14 +2584,29 @@ final class ControlPanel extends FrameLayout {
         void set(boolean on, String s) {
             if (shown != null && shown != on && SystemClock.uptimeMillis() < holdUntil) return;
             if (shown != null && shown == on) { setIfChanged(state, s); return; }
+            boolean first = shown == null;
             shown = on;
-            Context c = getContext();
-            setBackground(Ui.glass(on ? Ui.ACCENT : TILE, Ui.dp(c, 22)));
-            icon.setBackground(Ui.glass(on ? 0x33FFFFFF : ROUND, Ui.dp(c, 22)));
-            icon.setColor(on ? Color.WHITE : Ui.FG);
-            title.setTextColor(on ? Color.WHITE : Ui.FG);
             state.setText(s);
-            state.setTextColor(on ? 0xD9FFFFFF : Ui.FG2);
+            if (first) { paint(on ? 1f : 0f); return; }
+            // the colours flow from one state to the other instead of snapping
+            fade = Ui.crossfade(fade, f -> paint(on ? f : 1f - f));
+        }
+
+        private android.graphics.drawable.Drawable bg, iconBg;
+        private ValueAnimator fade;
+
+        /** t: 0 off .. 1 on. */
+        private void paint(float t) {
+            Context c = getContext();
+            if (bg == null) {
+                setBackground(bg = Ui.glass(TILE, Ui.dp(c, 22)));
+                icon.setBackground(iconBg = Ui.glass(ROUND, Ui.dp(c, 22)));
+            }
+            bg.setTint(Ui.mix(TILE, Ui.ACCENT, t));
+            iconBg.setTint(Ui.mix(ROUND, 0x33FFFFFF, t));
+            icon.setColor(Ui.mix(Ui.FG, Color.WHITE, t));
+            title.setTextColor(Ui.mix(Ui.FG, Color.WHITE, t));
+            state.setTextColor(Ui.mix(Ui.FG2, 0xD9FFFFFF, t));
         }
     }
 
@@ -2534,10 +2648,21 @@ final class ControlPanel extends FrameLayout {
         void setActive(boolean on) {
             if (shown != null && shown != on && SystemClock.uptimeMillis() < holdUntil) return;
             if (shown != null && shown == on) return;
+            boolean first = shown == null;
             shown = on;
-            icon.setBackground(Ui.glass(on ? Ui.ACCENT : ROUND, Ui.dp(getContext(), 27)));
-            icon.setColor(on ? Color.WHITE : Ui.FG);
-            label.setTextColor(on ? Ui.FG : Ui.FG2);
+            if (first) { paint(on ? 1f : 0f); return; }
+            fade = Ui.crossfade(fade, f -> paint(on ? f : 1f - f));
+        }
+
+        private android.graphics.drawable.Drawable iconBg;
+        private ValueAnimator fade;
+
+        /** t: 0 off .. 1 on. */
+        private void paint(float t) {
+            if (iconBg == null) icon.setBackground(iconBg = Ui.glass(ROUND, Ui.dp(getContext(), 27)));
+            iconBg.setTint(Ui.mix(ROUND, Ui.ACCENT, t));
+            icon.setColor(Ui.mix(Ui.FG, Color.WHITE, t));
+            label.setTextColor(Ui.mix(Ui.FG2, Ui.FG, t));
         }
 
         void setLabel(String s) { setIfChanged(label, s); }

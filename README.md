@@ -40,12 +40,12 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   comfort, Battery saver, Screenshot, Screen record, Cast, Calculator, Recorder, Lock and Power.
   Everything switches in place: what Android lets apps change directly, and the rest (Wi-Fi, mobile
   data, Bluetooth, hotspot, aeroplane mode, location, dark mode, eye comfort, power saving) by pressing
-  the phone's own Control Centre switch out of sight, behind the panel. Long-press opens the settings page.
-  Wi-Fi and Bluetooth: tap the round icon to switch, the rest of the tile for a page of networks or
-  devices; tap one to join or connect (a new network's password box opens when one is needed).
+  the phone's own Control Centre switch out of sight, behind the panel. Nothing opens Settings; "Original" shows the phone's own panel.
+  Wi-Fi and Bluetooth: tap the tile to switch, long-press it for our own page of networks or
+  devices with an On/Off switch; tap one to join or connect (a new network's password box opens when
+  one is needed). If the phone ignores a press (it does while a radio is still settling), it's pressed again.
   Screen record uses the phone's own recorder (no consent pop-up, with sound).
   Long-press the brightness slider to switch auto-brightness on or off.
-  Tap Bluetooth to see paired devices and which one is connected (or to get Android's turn-on prompt).
   Long-press any round button and drag it to rearrange the grid; the order is remembered.
   The pull strip is removed while the phone is locked.
 - **Look**: like the system's control centre, the panel shows whatever was on screen, blurred, behind

@@ -247,6 +247,15 @@ final class Ui {
     }
 
     static float dp(Context c, float v) { return v * c.getResources().getDisplayMetrics().density; }
+
+    /**
+     * Rubber band: how far something follows a finger pulled `over` pixels past where it should
+     * stop. It follows at first and gives less and less, never going past `dim` (iOS's curve).
+     */
+    static float rubber(float over, float dim) {
+        float a = Math.abs(over);
+        return Math.signum(over) * (1f - 1f / (a * 0.55f / dim + 1f)) * dim;
+    }
     static int dpi(Context c, float v) { return Math.round(dp(c, v)); }
 
     /**
@@ -376,8 +385,30 @@ final class Ui {
             @Override public void getOutline(android.graphics.Outline o) { o.setRoundRect(getBounds(), radius); }
             @Override public void setAlpha(int a) { fill.setAlpha(a); }
             @Override public void setColorFilter(android.graphics.ColorFilter cf) {}
+            // setTint(color) changes the fill in place (used to cross-fade a switch's colours)
+            @Override public void setTintList(android.content.res.ColorStateList t) {
+                if (t != null) { fill.setColor(t.getDefaultColor()); invalidateSelf(); }
+            }
             @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
         };
+    }
+
+    private static final android.animation.ArgbEvaluator ARGB = new android.animation.ArgbEvaluator();
+
+    static int mix(int a, int b, float f) { return (Integer) ARGB.evaluate(f, a, b); }
+
+    /**
+     * Cross-fade a switch from off to on (or back): f goes 0..1 over a short, eased moment and
+     * paint(f) draws each step. Returns the animator so a newer change can cancel it.
+     */
+    static ValueAnimator crossfade(ValueAnimator running, java.util.function.Consumer<Float> paint) {
+        if (running != null) running.cancel();
+        ValueAnimator a = ValueAnimator.ofFloat(0f, 1f);
+        a.setDuration(220);
+        a.setInterpolator(STANDARD);
+        a.addUpdateListener(an -> paint.accept((Float) an.getAnimatedValue()));
+        a.start();
+        return a;
     }
 
     static GradientDrawable round(int color, float radius) {
@@ -737,6 +768,20 @@ final class Ui {
         }
 
         void setListener(OnPick l) { listener = l; }
+
+        boolean isOn() { return on; }
+
+        /** Show a state from outside (no listener call); slides there when animate is true. */
+        void setOn(boolean v, boolean animate) {
+            if (v == on && pos == (v ? 1 : 0)) return;
+            on = v;
+            if (!animate) { pos = v ? 1 : 0; invalidate(); return; }
+            ValueAnimator a = ValueAnimator.ofFloat(pos, v ? 1 : 0);
+            a.setDuration(220);
+            a.setInterpolator(EMPHASIZED);
+            a.addUpdateListener(an -> { pos = (Float) an.getAnimatedValue(); invalidate(); });
+            a.start();
+        }
 
         @Override protected void onMeasure(int ws, int hs) {
             setMeasuredDimension(dpi(getContext(), 52), dpi(getContext(), 32));

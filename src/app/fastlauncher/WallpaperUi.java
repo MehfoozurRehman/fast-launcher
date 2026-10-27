@@ -230,7 +230,7 @@ final class WallpaperUi {
             pickHead.addView(all);
             HorizontalScrollView pickScroll = new HorizontalScrollView(c);
             pickScroll.setHorizontalScrollBarEnabled(false);
-            pickScroll.setOverScrollMode(OVER_SCROLL_NEVER);
+            pickScroll.setOverScrollMode(OVER_SCROLL_IF_CONTENT_SCROLLS); // stretches at the ends
             pickScroll.setClipToPadding(false);
             int edge = Ui.dpi(c, 18);
             pickScroll.setPadding(edge, 0, edge, 0);
@@ -251,7 +251,7 @@ final class WallpaperUi {
             themeHead.addView(Ui.text(c, "New ones come from these", 11.5f, Ui.FG3, false));
             HorizontalScrollView themeScroll = new HorizontalScrollView(c);
             themeScroll.setHorizontalScrollBarEnabled(false);
-            themeScroll.setOverScrollMode(OVER_SCROLL_NEVER);
+            themeScroll.setOverScrollMode(OVER_SCROLL_IF_CONTENT_SCROLLS); // stretches at the ends
             themeScroll.setClipToPadding(false);
             themeScroll.setPadding(edge, 0, edge, 0);
             LinearLayout chips = new LinearLayout(c);
@@ -660,7 +660,7 @@ final class WallpaperUi {
 
             HorizontalScrollView hs = new HorizontalScrollView(c);
             hs.setHorizontalScrollBarEnabled(false);
-            hs.setOverScrollMode(OVER_SCROLL_NEVER);
+            hs.setOverScrollMode(OVER_SCROLL_IF_CONTENT_SCROLLS); // stretches at the ends
             LinearLayout chipRow = new LinearLayout(c);
             chipRow.setPadding(Ui.dpi(c, 16), 0, Ui.dpi(c, 16), 0);
             hs.addView(chipRow);
