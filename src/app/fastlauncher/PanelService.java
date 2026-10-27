@@ -522,6 +522,38 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
     }
 
     /**
+     * A pull that started on the home screen: get the panel ready on that side and show it, then
+     * let the finger drive it (pullTo) until it lets go (endPull), the same as a pull from the
+     * status bar. Back up again before letting go and it closes, without lifting the thumb.
+     */
+    static boolean beginPull(boolean notifications) {
+        PanelService s = running;
+        if (s == null) return false;
+        s.ensurePanel();
+        if (!s.panelOpen) {
+            Ui.theme(s);
+            if (s.panel.builtAccent != Ui.ACCENT || s.panel.isDark != Ui.dark) s.rebuildPanel();
+            s.captureBehind();
+            s.panel.refresh(notifications);
+        } else s.panel.openPage(notifications);
+        s.panel.fingerDown = true;
+        s.showPanel();
+        return true;
+    }
+
+    static void pullTo(float dy) {
+        PanelService s = running;
+        if (s != null && s.panel != null) s.panel.dragFromTop(Math.max(0f, dy));
+    }
+
+    static void endPull(float velocity) {
+        PanelService s = running;
+        if (s == null || s.panel == null) return;
+        s.panel.fingerDown = false;
+        s.panel.settle(velocity);
+    }
+
+    /**
      * Swipe down on it to pull the panel; the same touch stream keeps driving the panel.
      * It spans the status bar: the left side opens notifications, the right side the controls.
      */

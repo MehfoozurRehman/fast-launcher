@@ -1547,6 +1547,9 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         float progress; // 0 closed .. 1 open
         private float downX, downY, startProgress;
         private boolean dragging, homeLayered, barsDark = true, shadeFired;
+        /** This gesture is driving our panel (pulled down on home): where the pull began. */
+        private boolean pullingPanel;
+        private float pullFrom;
         private VelocityTracker vt;
         private ValueAnimator anim;
         private final int slop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
@@ -1703,7 +1706,11 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                     removeCallbacks(homeLongPress);
                     // starting near the top: the same left/right rule as the status bar; lower: notifications
                     boolean top = downY < insetTop + dpi(160);
-                    expandNotifications(!(top && downX > getWidth() * 0.45f));
+                    boolean notifs = !(top && downX > getWidth() * 0.45f);
+                    // our panel follows the thumb, down and back up, until it lets go
+                    pullingPanel = PanelService.beginPull(notifs);
+                    pullFrom = ev.getY();
+                    if (!pullingPanel) expandNotifications(notifs); // the system shade instead
                 }
                 return true;
             }
@@ -1765,6 +1772,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                     if (!dragging && (Math.abs(ev.getY() - downY) > slop || Math.abs(ev.getX() - downX) > slop))
                         removeCallbacks(homeLongPress);
                     if (!dragging) maybeStartDrag(ev);
+                    if (pullingPanel) { PanelService.pullTo(ev.getY() - pullFrom); return true; }
                     if (dragging) {
                         float p = startProgress + distanceFor(downY - ev.getY());
                         setProgress(p);
@@ -1774,6 +1782,14 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
                     removeCallbacks(homeLongPress);
+                    if (pullingPanel) { // let go of a pull: the panel settles open or closed
+                        pullingPanel = false;
+                        vt.computeCurrentVelocity(1000);
+                        PanelService.endPull(ev.getActionMasked() == MotionEvent.ACTION_UP ? vt.getYVelocity() : 0f);
+                        vt.recycle();
+                        vt = null;
+                        return true;
+                    }
                     if (!dragging && progress == 0f && ev.getActionMasked() == MotionEvent.ACTION_UP) checkDoubleTap(ev);
                     if (dragging) {
                         vt.computeCurrentVelocity(1000);
