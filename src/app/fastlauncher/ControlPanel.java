@@ -1193,7 +1193,7 @@ final class ControlPanel extends FrameLayout {
 
     /**
      * Clear all: the cards that can go sweep off one after another, then everything clearable is
-     * dismissed. You stay on the notifications page (ongoing ones like USB mode remain).
+     * dismissed, and the panel closes (ongoing ones like USB mode remain for next time).
      */
     private void clearAllNotifications() {
         performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
@@ -1207,6 +1207,7 @@ final class ControlPanel extends FrameLayout {
             delay += 35;
         }
         main.postDelayed(NotifService::dismissAll, delay + 180);
+        main.postDelayed(this::close, delay + 260); // all cleared: the panel goes too
     }
 
     /** A card (or a group of them) that Clear all removes: not an ongoing one. */
