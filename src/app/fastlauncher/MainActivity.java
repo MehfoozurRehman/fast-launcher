@@ -552,7 +552,16 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         });
     }
 
+    private View dimView;
+
     private void buildDrawer() {
+        // first the wallpaper (and home on it) darkens in place, still sharp...
+        dimView = new View(this);
+        dimView.setBackgroundColor(Color.BLACK);
+        dimView.setAlpha(0f);
+        dimView.setVisibility(View.INVISIBLE);
+        root.addView(dimView, new FrameLayout.LayoutParams(-1, -1));
+        // ...then the drawer's own deep, wallpaper-tinted background comes in under the apps
         blurView = new BlurView(this);
         blurView.setVisibility(View.INVISIBLE);
         root.addView(blurView, new FrameLayout.LayoutParams(-1, -1));
@@ -562,7 +571,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         drawer = new FrameLayout(this) {
             @Override public boolean hasOverlappingRendering() { return false; }
         };
-        drawer.setBackgroundColor(0x59000000);
+        blurView.setForeground(new android.graphics.drawable.ColorDrawable(0xB3000000)); // deep, like Smart Launcher's
         drawer.setVisibility(View.INVISIBLE);
         root.addView(drawer, new FrameLayout.LayoutParams(-1, -1));
 
@@ -1593,6 +1602,9 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 home.setScaleX(1f);
                 home.setScaleY(1f);
                 home.setTranslationY(0f);
+                dock.setTranslationY(0f);
+                dimView.setAlpha(0f);
+                dimView.setVisibility(View.INVISIBLE);
                 return;
             }
             if (drawer.getVisibility() != View.VISIBLE) {
@@ -1600,31 +1612,42 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 drawer.setVisibility(View.VISIBLE);
             }
             if (blurView.hasBlur() && blurView.getVisibility() != View.VISIBLE) blurView.setVisibility(View.VISIBLE);
-            // like the control center: the apps come up under the thumb, one to one with the finger,
-            // fading in as they come; the background blurs in place; home (clock, date, dock)
-            // fades away behind, settling back a little
+            // Smart Launcher's sequence (measured frame by frame on this phone), driven by the
+            // thumb: the further the pull, the further along.
+            //  first half: home shrinks back a little and fades, the dock lifting as it goes,
+            //   while the wallpaper darkens in place (still sharp)
+            //  second half: the apps fade in where they belong, rising the last few dp into
+            //   place over the drawer's deep background; closing runs it backwards
+            // (home is gone before the apps arrive, so the two never show through each other)
+            float act1 = span(progress, 0f, 0.42f), act2 = span(progress, 0.42f, 0.68f);
             layDrawer();
-            drawer.setAlpha(Math.min(1f, progress * 1.4f));
-            if (drawer.getBackground() != null) drawer.getBackground().setAlpha(Math.round(255 * Math.min(1f, progress * 1.5f)));
-            blurView.setAlpha(Math.min(1f, progress * 1.5f));
+            drawer.setAlpha(act2);
+            blurView.setAlpha(span(progress, 0.35f, 0.62f));
+            if (dimView.getVisibility() != View.VISIBLE) dimView.setVisibility(View.VISIBLE);
+            dimView.setAlpha(0.5f * act1);
             if (!searching) {
                 title.setAlpha(1f);
                 btnSearch.setAlpha(1f);
             }
 
-            float ha = 1f - Math.min(1f, progress * 1.7f);
+            float ha = 1f - span(progress, 0.05f, 0.42f);
             home.setAlpha(ha);
             int hv = ha <= 0f ? View.INVISIBLE : View.VISIBLE;
             if (home.getVisibility() != hv) home.setVisibility(hv);
-            float sc = 1f - 0.08f * progress;
+            float sc = 1f - 0.08f * act1;
             home.setScaleX(sc);
             home.setScaleY(sc);
             home.setTranslationY(0f);
+            dock.setTranslationY(-28 * dp * act1);
         }
 
-        /** Where the apps are: exactly as far below their place as the finger still has to go. */
+        /** 0 before `from`, 1 after `to`, straight in between. */
+        private float span(float v, float from, float to) { return Math.max(0f, Math.min(1f, (v - from) / (to - from))); }
+
+        /** The apps rise the last few dp into place as they fade in (not all the way from the bottom). */
         private void layDrawer() {
-            drawer.setTranslationY((1f - progress) * travel() * 0.45f - over);
+            float rise = span(progress, 0.42f, 0.8f);
+            drawer.setTranslationY((1f - rise) * (1f - rise) * 36 * dp - over); // eases into place
         }
 
         /** Pushed up past fully open: the drawer gives a little (pixels), then springs back. */
