@@ -44,6 +44,15 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   Wi-Fi and Bluetooth: tap the tile to switch, long-press it for our own page of networks or
   devices with an On/Off switch; tap one to join or connect (a new network's password box opens when
   one is needed). If the phone ignores a press (it does while a radio is still settling), it's pressed again.
+  Our own pages (long-press the tile, or hold a round button and let go; hold and drag still moves it):
+  Mobile data (carrier, 4G/5G and signal, each SIM, data used today and this month), Hotspot (on/off,
+  what it shares, data shared today), Location (where you are now, which apps can use it), Sound
+  (ring / vibrate / silent and a slider for every volume; also on long-press of the volume slider),
+  Do not disturb (priority / alarms only / total silence, for 1 hour, 2 hours or until morning),
+  Battery (level, charging and time to full, health, temperature, power saving) and Torch
+  (brightness levels on phones that have them). Each has a link to the full settings at the bottom.
+  One-time setup over adb for the numbers: `pm grant app.fastlauncher android.permission.READ_PHONE_STATE`,
+  `appops set app.fastlauncher GET_USAGE_STATS allow` and `appops set app.fastlauncher SCHEDULE_EXACT_ALARM allow`.
   Screen record uses the phone's own recorder (no consent pop-up, with sound).
   Long-press the brightness slider to switch auto-brightness on or off.
   Long-press any round button and drag it to rearrange the grid; the order is remembered.

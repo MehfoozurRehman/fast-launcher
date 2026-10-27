@@ -27,6 +27,12 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- the Mobile data page: carrier, network type and each SIM (granted over adb) -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <!-- data used today / this month and shared by the hotspot (usage access, granted over adb) -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
+    <!-- Do not disturb "for 1 hour" ends on time (granted over adb) -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <queries>
         <intent>
@@ -88,6 +94,10 @@
             android:excludeFromRecents="true"
             android:taskAffinity=""
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <!-- switches Do not disturb off when its timer (1 hour, 2 hours, morning) runs out -->
+        <receiver
+            android:name=".ControlPanel$DndEnd"
+            android:exported="false" />
         <service
             android:name=".Recorder$Service_"
             android:exported="false"

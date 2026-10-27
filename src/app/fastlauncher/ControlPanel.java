@@ -83,7 +83,10 @@ final class ControlPanel extends FrameLayout {
     private int page = CONTROLS;
     private final ScrollView btScroll;
     /** The detail page (slot after the controls) shows Wi-Fi networks or Bluetooth devices. */
-    private boolean detailWifi;
+    static final int D_WIFI = 0, D_BT = 1, D_DATA = 2, D_HOTSPOT = 3, D_LOCATION = 4, D_SOUND = 5,
+            D_DND = 6, D_BATTERY = 7, D_TORCH = 8;
+    /** Which page it is (opened by long-pressing a control). */
+    private int detail = D_BT;
     private TextView detailTitle, detailMore;
     private final FrameLayout pager;
     private final Dots dots;
@@ -325,8 +328,7 @@ final class ControlPanel extends FrameLayout {
         btList.setLayoutTransition(Ui.rows()); // rows fade in and out as it turns on and off
         bpage.addView(btList, Ui.lp(-1, -2, Ui.dpi(c, 12)));
         LinearLayout bfoot = new LinearLayout(c);
-        detailMore = pill(c, "More Bluetooth settings", () -> open(new Intent(detailWifi
-                ? Settings.ACTION_WIFI_SETTINGS : Settings.ACTION_BLUETOOTH_SETTINGS)));
+        detailMore = pill(c, "More Bluetooth settings", () -> open(detailIntent()));
         bfoot.addView(detailMore, new LinearLayout.LayoutParams(0, Ui.dpi(c, 44), 1f));
         bpage.addView(bfoot, Ui.lp(-1, -2, Ui.dpi(c, 12)));
         btScroll.addView(bpage);
@@ -342,11 +344,13 @@ final class ControlPanel extends FrameLayout {
         body.addView(pair(c, bluetooth, torch), Ui.lp(-1, Ui.dpi(c, 64), Ui.dpi(c, 8)));
         // tap switches it right here; long-press opens our own page (networks / devices)
         wifi.setOnClickListener(v -> systemToggle("Wi-Fi", wifi, null));
-        wifi.setOnLongClickListener(v -> { openDetail(true); return true; });
+        wifi.setOnLongClickListener(v -> { openDetail(D_WIFI); return true; });
         bluetooth.setOnClickListener(v -> systemToggle("Bluetooth", bluetooth, null));
-        bluetooth.setOnLongClickListener(v -> { openDetail(false); return true; });
+        bluetooth.setOnLongClickListener(v -> { openDetail(D_BT); return true; });
         data.setOnClickListener(v -> systemToggle("Mobile data", data, new Intent(Settings.Panel.ACTION_INTERNET_CONNECTIVITY)));
         torch.setOnClickListener(v -> safe(this::toggleTorch));
+        data.setOnLongClickListener(v -> { openDetail(D_DATA); return true; });
+        torch.setOnLongClickListener(v -> { openDetail(D_TORCH); return true; });
 
         // ---- media (half the width) beside the two sliders, all in one row
         LinearLayout mediaRow = new LinearLayout(c);
@@ -445,6 +449,7 @@ final class ControlPanel extends FrameLayout {
             brightness.setLabel(null); // dragging means an exact level: auto is off
         });
         brightness.onLongPress = () -> safe(this::toggleAutoBrightness);
+        volume.onLongPress = () -> openDetail(D_SOUND); // every volume, and ring / vibrate / silent
         volume.listener = (v, d) -> safe(() -> setVolume(v, d));
         body.addView(mediaRow, Ui.lp(-1, Ui.dpi(c, 168), Ui.dpi(c, 10)));
 
@@ -473,6 +478,12 @@ final class ControlPanel extends FrameLayout {
         grid.setRounds(java.util.Arrays.asList(hotspot, rotate, plane, location, dark, dnd, sound, eye,
                 saver, screenshot, record, cast, calc, recorder, lock, power), prefs.getString("order", ""));
         grid.saved = ids -> prefs.edit().putString("order", ids).apply();
+        // hold one and let go: its own page; hold and drag: move it
+        grid.pages.put(hotspot, () -> openDetail(D_HOTSPOT));
+        grid.pages.put(location, () -> openDetail(D_LOCATION));
+        grid.pages.put(sound, () -> openDetail(D_SOUND));
+        grid.pages.put(dnd, () -> openDetail(D_DND));
+        grid.pages.put(saver, () -> openDetail(D_BATTERY));
         body.addView(grid, Ui.lp(-1, -2, Ui.dpi(c, 10)));
 
         // these switch in place by pressing the phone's own tile out of sight; long-press lifts
@@ -591,6 +602,7 @@ final class ControlPanel extends FrameLayout {
     private final Runnable statusTick = new Runnable() {
         @Override public void run() {
             statusRow.refresh();
+            if (page == BT && detail != D_SOUND) safe(ControlPanel.this::rebuildDetail); // live numbers
             if (progress > 0f) main.postDelayed(this, 5000);
         }
     };
@@ -754,21 +766,14 @@ final class ControlPanel extends FrameLayout {
     }
 
     private void toggleDnd() {
-        NotificationManager nm = (NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE);
-        if (!nm.isNotificationPolicyAccessGranted()) {
-            open(new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS));
-            return;
-        }
-        boolean on = nm.getCurrentInterruptionFilter() > NotificationManager.INTERRUPTION_FILTER_ALL;
-        nm.setInterruptionFilter(on ? NotificationManager.INTERRUPTION_FILTER_ALL : NotificationManager.INTERRUPTION_FILTER_PRIORITY);
-        dnd.setActive(!on);
+        setDnd(!dndOn(), NotificationManager.INTERRUPTION_FILTER_PRIORITY);
     }
 
     /** Ring -> vibrate -> silent (silent needs Do-not-disturb access, otherwise ring <-> vibrate). */
     private void cycleSound() {
         AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
         NotificationManager nm = (NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE);
-        int m = am.getRingerMode();
+        int m = ringerMode();
         int next;
         if (m == AudioManager.RINGER_MODE_NORMAL) next = AudioManager.RINGER_MODE_VIBRATE;
         else if (m == AudioManager.RINGER_MODE_VIBRATE && nm.isNotificationPolicyAccessGranted()) next = AudioManager.RINGER_MODE_SILENT;
@@ -777,9 +782,18 @@ final class ControlPanel extends FrameLayout {
         showSound();
     }
 
-    private void showSound() {
+    /**
+     * The sound mode you chose. Android reports "silent" while Do not disturb is on, whatever
+     * was chosen; the setting underneath still holds the real choice.
+     */
+    private int ringerMode() {
         AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
-        int m = am.getRingerMode();
+        if (!dndOn()) return am.getRingerMode(); // exact, and current the moment it's set
+        return Settings.Global.getInt(getContext().getContentResolver(), "mode_ringer", am.getRingerMode());
+    }
+
+    private void showSound() {
+        int m = ringerMode();
         sound.icon.setType(m == AudioManager.RINGER_MODE_VIBRATE ? PanelIcons.VIBRATE
                 : m == AudioManager.RINGER_MODE_SILENT ? PanelIcons.BELL_OFF : PanelIcons.BELL);
         sound.setLabel(m == AudioManager.RINGER_MODE_VIBRATE ? "Vibrate" : m == AudioManager.RINGER_MODE_SILENT ? "Silent" : "Ring");
@@ -1116,8 +1130,8 @@ final class ControlPanel extends FrameLayout {
             @Override public void onServiceConnected(int profile, android.bluetooth.BluetoothProfile proxy) {
                 btProfiles.put(profile, proxy);
                 // who's connected is only known now: let the first order use it (before any tap)
-                if (btBusy == null && !detailWifi) rowOrder.clear();
-                if (page == BT && !detailWifi) buildBt();
+                if (btBusy == null && detail == D_BT) rowOrder.clear();
+                if (page == BT && detail == D_BT) buildBt();
             }
             @Override public void onServiceDisconnected(int profile) { btProfiles.remove(profile); }
         };
@@ -1150,31 +1164,703 @@ final class ControlPanel extends FrameLayout {
         return false;
     }
 
+    // ---------------------------------------------------------------- the detail page, any kind
+
     private void onDetailSwitch(int v) {
         switchedAt = SystemClock.uptimeMillis();
+        String tile = null;
+        View button = null;
+        switch (detail) {
+            case D_WIFI: tile = "Wi-Fi"; button = wifi; break;
+            case D_BT: tile = "Bluetooth"; button = bluetooth; break;
+            case D_DATA: tile = "Mobile data"; button = data; break;
+            case D_HOTSPOT: tile = "Hotspot"; button = hotspot; break;
+            case D_LOCATION: tile = "Location"; button = location; break;
+            case D_BATTERY: tile = "Power Saving"; button = saver; break;
+            case D_DND: safe(() -> setDnd(v == 1, NotificationManager.INTERRUPTION_FILTER_PRIORITY)); break;
+            case D_TORCH: safe(this::toggleTorch); break;
+        }
+        if (tile == null) { main.postDelayed(this::rebuildDetail, 120); return; } // switched at once
+        // the phone's own switch takes a moment: say so instead of showing a stale list
         rowsSig = null;
         btList.removeAllViews();
         btList.addView(btMessage(getContext(), v == 1 ? "Turning on…" : "Turning off…"));
-        systemToggle(detailWifi ? "Wi-Fi" : "Bluetooth", detailWifi ? wifi : bluetooth, null);
+        systemToggle(tile, button, null);
     }
+
+    private void rebuildDetail() { if (page == BT && progress > 0f) buildDetail(); }
 
     /** Just flipped: readings that still show the old state are the phone catching up. */
     private boolean holdingSwitch() {
-        boolean on = detailWifi ? wifiOn() : btOn();
-        return SystemClock.uptimeMillis() - switchedAt < HOLD_MS && on != btToggle.isOn();
+        return SystemClock.uptimeMillis() - switchedAt < HOLD_MS && detailOn() != btToggle.isOn();
     }
 
-    private void openDetail(boolean wifiPage) {
-        if (detailWifi != wifiPage || page != BT) rowOrder.clear();
-        detailWifi = wifiPage;
+    private void openDetail(int kind) {
+        if (detail != kind || page != BT) { rowOrder.clear(); rowsSig = null; allApps = false; btScroll.scrollTo(0, 0); }
+        detail = kind;
         if (page == BT) buildDetail();
         slideTo(BT);
     }
 
+    private String detailName() {
+        switch (detail) {
+            case D_WIFI: return "Wi-Fi";
+            case D_DATA: return "Mobile data";
+            case D_HOTSPOT: return "Hotspot";
+            case D_LOCATION: return "Location";
+            case D_SOUND: return "Sound";
+            case D_DND: return "Do not disturb";
+            case D_BATTERY: return "Battery";
+            case D_TORCH: return "Torch";
+            default: return "Bluetooth";
+        }
+    }
+
+    /** The link at the bottom: the full settings screen for what the page can't do itself. */
+    private String detailLink() {
+        switch (detail) {
+            case D_WIFI: return "More Wi-Fi settings";
+            case D_DATA: return "SIM and data settings";
+            case D_HOTSPOT: return "Hotspot name and password";
+            case D_LOCATION: return "More location settings";
+            case D_SOUND: return "Ringtones and more";
+            case D_DND: return "Who can reach you";
+            case D_BATTERY: return "Battery usage by app";
+            case D_TORCH: return null;
+            default: return "Pair a new device";
+        }
+    }
+
+    private Intent detailIntent() {
+        switch (detail) {
+            case D_WIFI: return new Intent(Settings.ACTION_WIFI_SETTINGS);
+            case D_DATA: return new Intent(Settings.ACTION_DATA_USAGE_SETTINGS);
+            case D_HOTSPOT: return new Intent(Settings.ACTION_WIRELESS_SETTINGS);
+            case D_LOCATION: return new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS);
+            case D_SOUND: return new Intent(Settings.ACTION_SOUND_SETTINGS);
+            case D_DND: return new Intent(Settings.ACTION_ZEN_MODE_PRIORITY_SETTINGS);
+            case D_BATTERY: return new Intent(Intent.ACTION_POWER_USAGE_SUMMARY);
+            default: return new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
+        }
+    }
+
+    private boolean detailOn() {
+        switch (detail) {
+            case D_WIFI: return wifiOn();
+            case D_BT: return btOn();
+            case D_DATA: return dataOn();
+            case D_HOTSPOT: return hotspotOn((WifiManager) getContext().getApplicationContext().getSystemService(Context.WIFI_SERVICE));
+            case D_LOCATION: return locationOn();
+            case D_DND: return dndOn();
+            case D_BATTERY: return saverOn();
+            case D_TORCH: return torchOn;
+            default: return false;
+        }
+    }
+
     private void buildDetail() {
-        detailTitle.setText(detailWifi ? "Wi-Fi" : "Bluetooth");
-        detailMore.setText(detailWifi ? "More Wi-Fi settings" : "Pair a new device");
-        if (detailWifi) buildWifi(); else buildBt();
+        detailTitle.setText(detailName());
+        String link = detailLink();
+        detailMore.setVisibility(link == null ? GONE : VISIBLE);
+        if (link != null) detailMore.setText(link);
+        btToggle.setVisibility(detail == D_SOUND ? INVISIBLE : VISIBLE); // Sound has three choices, not on/off
+        switch (detail) {
+            case D_WIFI: buildWifi(); break;
+            case D_DATA: buildData(); break;
+            case D_HOTSPOT: buildHotspot(); break;
+            case D_LOCATION: buildLocation(); break;
+            case D_SOUND: buildSound(); break;
+            case D_DND: buildDnd(); break;
+            case D_BATTERY: buildBattery(); break;
+            case D_TORCH: buildTorch(); break;
+            default: buildBt();
+        }
+    }
+
+    // ---- rows shared by the pages
+
+    private void addRow(View row) {
+        btList.addView(row, Ui.lp(-1, -2, btList.getChildCount() == 0 ? 0 : Ui.dpi(getContext(), 8)));
+    }
+
+    /** A row that only tells you something (not pressable). */
+    private void info(int icon, String title, String sub, boolean lit) {
+        View r = deviceRow(getContext(), icon, title, sub, lit);
+        r.setOnTouchListener(null);
+        r.setClickable(false);
+        addRow(r);
+    }
+
+    /** One of a few choices: the chosen one is lit; tap another to pick it. */
+    private void choice(int icon, String title, String sub, boolean chosen, Runnable pick) {
+        View r = deviceRow(getContext(), icon, title, sub, chosen);
+        r.setOnClickListener(v -> {
+            if (chosen) return;
+            v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            safe(pick);
+            rowsSig = null;
+            main.postDelayed(this::rebuildDetail, 60);
+            main.postDelayed(this::rebuildDetail, 500); // and once the phone has settled
+        });
+        addRow(r);
+    }
+
+    /** A small heading between groups of rows. */
+    private void heading(String text) {
+        Context c = getContext();
+        TextView t = Ui.text(c, text, 13, Ui.FG2, true);
+        t.setPadding(Ui.dpi(c, 6), Ui.dpi(c, 10), 0, Ui.dpi(c, 2));
+        addRow(t);
+    }
+
+    private String size(long bytes) { return android.text.format.Formatter.formatShortFileSize(getContext(), Math.max(0, bytes)); }
+
+    private static final java.util.concurrent.ExecutorService pageWorker = java.util.concurrent.Executors.newSingleThreadExecutor();
+
+    /** Work too slow for the main thread (data totals, an address): runs once, then the page refreshes. */
+    private void slow(Runnable job) {
+        pageWorker.execute(() -> {
+            try { job.run(); } catch (Throwable ignored) {}
+            main.post(this::rebuildDetail);
+        });
+    }
+
+    // ---------------------------------------------------------------- Mobile data
+
+    private boolean dataOn() { return Settings.Global.getInt(getContext().getContentResolver(), "mobile_data", 0) == 1; }
+
+    /** Mobile data used today and this month, and shared by the hotspot today; null until counted. */
+    private volatile long[] usage;
+    private long usageAt;
+
+    private boolean usageAllowed() {
+        android.app.AppOpsManager ao = (android.app.AppOpsManager) getContext().getSystemService(Context.APP_OPS_SERVICE);
+        return ao.unsafeCheckOpNoThrow(android.app.AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(),
+                getContext().getPackageName()) == android.app.AppOpsManager.MODE_ALLOWED;
+    }
+
+    private void countUsage() {
+        if (SystemClock.uptimeMillis() - usageAt < 30_000 || !usageAllowed()) return;
+        usageAt = SystemClock.uptimeMillis();
+        final Context c = getContext().getApplicationContext();
+        slow(() -> {
+            android.app.usage.NetworkStatsManager ns = (android.app.usage.NetworkStatsManager) c.getSystemService(Context.NETWORK_STATS_SERVICE);
+            Calendar day = Calendar.getInstance();
+            day.set(Calendar.HOUR_OF_DAY, 0); day.set(Calendar.MINUTE, 0); day.set(Calendar.SECOND, 0); day.set(Calendar.MILLISECOND, 0);
+            Calendar month = (Calendar) day.clone();
+            month.set(Calendar.DAY_OF_MONTH, 1);
+            long now = System.currentTimeMillis() + 60_000;
+            long today = 0, thisMonth = 0, shared = 0;
+            try {
+                android.app.usage.NetworkStats.Bucket b = ns.querySummaryForDevice(android.net.ConnectivityManager.TYPE_MOBILE, null, day.getTimeInMillis(), now);
+                today = b.getRxBytes() + b.getTxBytes();
+                b = ns.querySummaryForDevice(android.net.ConnectivityManager.TYPE_MOBILE, null, month.getTimeInMillis(), now);
+                thisMonth = b.getRxBytes() + b.getTxBytes();
+            } catch (Exception ignored) {}
+            // what the hotspot passed on today: the "tethering" bucket, on mobile and on Wi-Fi
+            for (int type : new int[]{android.net.ConnectivityManager.TYPE_MOBILE, android.net.ConnectivityManager.TYPE_WIFI}) {
+                try (android.app.usage.NetworkStats s = ns.querySummary(type, null, day.getTimeInMillis(), now)) {
+                    android.app.usage.NetworkStats.Bucket b = new android.app.usage.NetworkStats.Bucket();
+                    while (s.hasNextBucket()) {
+                        s.getNextBucket(b);
+                        if (b.getUid() == android.app.usage.NetworkStats.Bucket.UID_TETHERING) shared += b.getRxBytes() + b.getTxBytes();
+                    }
+                } catch (Exception ignored) {}
+            }
+            usage = new long[]{today, thisMonth, shared};
+        });
+    }
+
+    private static String networkType(int t) {
+        switch (t) {
+            case 20: return "5G"; // NETWORK_TYPE_NR
+            case 13: case 18: return "4G";
+            case 3: case 8: case 9: case 10: case 15: case 17: case 5: case 6: case 12: case 14: return "3G";
+            case 1: case 2: case 4: case 7: case 11: case 16: return "2G";
+            default: return null;
+        }
+    }
+
+    private void buildData() {
+        Context c = getContext();
+        boolean on = dataOn();
+        if (holdingSwitch()) return;
+        btToggle.setOn(on, true);
+        countUsage();
+        android.telephony.TelephonyManager tm = (android.telephony.TelephonyManager) c.getSystemService(Context.TELEPHONY_SERVICE);
+        String carrier = tm.getNetworkOperatorName();
+        if (carrier == null || carrier.isEmpty()) carrier = "No SIM";
+        String net = null;
+        try { net = networkType(tm.getDataNetworkType()); } catch (SecurityException ignored) {}
+        int level = -1;
+        try { android.telephony.SignalStrength ss = tm.getSignalStrength(); if (ss != null) level = ss.getLevel(); } catch (Exception ignored) {}
+        boolean roaming = tm.isNetworkRoaming();
+        // every SIM, the data one first
+        java.util.List<String[]> sims = new java.util.ArrayList<>();
+        try {
+            android.telephony.SubscriptionManager sm = (android.telephony.SubscriptionManager) c.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE);
+            int dataSub = android.telephony.SubscriptionManager.getDefaultDataSubscriptionId();
+            List<android.telephony.SubscriptionInfo> subs = sm.getActiveSubscriptionInfoList();
+            if (subs != null) for (android.telephony.SubscriptionInfo s : subs) {
+                String name = String.valueOf(s.getCarrierName() != null ? s.getCarrierName() : s.getDisplayName());
+                sims.add(new String[]{"SIM " + (s.getSimSlotIndex() + 1) + "  ·  " + name, s.getSubscriptionId() == dataSub ? "1" : "0"});
+            }
+        } catch (SecurityException ignored) {}
+        long[] u = usage;
+        StringBuilder sig = new StringBuilder("d:").append(on).append(carrier).append(net).append(level).append(roaming);
+        for (String[] s : sims) sig.append(s[0]).append(s[1]);
+        if (u != null) sig.append(u[0]).append(',').append(u[1]);
+        if (sameRows(sig.toString())) return;
+        String bars = level < 0 ? null : new String[]{"no signal", "weak signal", "fair signal", "good signal", "strong signal"}[Math.min(4, level)];
+        String sub = !on ? "Mobile data is off" : (net == null ? "Connected" : net) + (bars == null ? "" : "  ·  " + bars);
+        info(PanelIcons.DATA, carrier, sub, on);
+        if (roaming) info(PanelIcons.PLANE, "Roaming", "You're on another network; data may cost more", false);
+        if (sims.size() > 1) {
+            heading("SIMs");
+            for (String[] s : sims) info(PanelIcons.DATA, s[0], s[1].equals("1") ? "Used for mobile data" : "Calls and texts", s[1].equals("1"));
+        }
+        heading("Data used");
+        if (u != null) {
+            info(PanelIcons.DATA, size(u[0]), "Today", false);
+            info(PanelIcons.DATA, size(u[1]), "This month, since the 1st", false);
+        } else if (!usageAllowed()) {
+            choice(PanelIcons.DATA, "See how much data you've used", "Give Fast Launcher usage access", false,
+                    () -> open(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)));
+        } else {
+            addRow(btMessage(c, "Counting…"));
+        }
+    }
+
+    // ---------------------------------------------------------------- Hotspot
+
+    private void buildHotspot() {
+        Context c = getContext();
+        boolean on = detailOn();
+        if (holdingSwitch()) return;
+        btToggle.setOn(on, true);
+        countUsage();
+        boolean mobile = dataOn();
+        long[] u = usage;
+        String sig = "h:" + on + mobile + (u == null ? "" : u[2]);
+        if (sameRows(sig)) return;
+        info(PanelIcons.HOTSPOT, on ? "Hotspot is on" : "Hotspot is off",
+                on ? "Other devices can join and use your connection" : "Switch it on to share your connection", on);
+        if (on && !mobile && !wifiOn())
+            info(PanelIcons.DATA, "No connection to share", "Mobile data is off, so devices that join won't get internet", false);
+        else info(PanelIcons.DATA, "Sharing mobile data", mobile ? "Mobile data is on" : "Mobile data is off", mobile);
+        if (u != null) info(PanelIcons.HOTSPOT, size(u[2]), "Shared with other devices today", false);
+    }
+
+    // ---------------------------------------------------------------- Location
+
+    private boolean locationOn() {
+        LocationManager lm = (LocationManager) getContext().getSystemService(Context.LOCATION_SERVICE);
+        return lm != null && lm.isLocationEnabled();
+    }
+
+    private volatile String place, placeSub;
+    private volatile java.util.List<String[]> locationApps; // label, how
+    private long placeAt, appsAt;
+    private boolean allApps;
+
+    private void findPlace() {
+        if (SystemClock.uptimeMillis() - placeAt < 60_000) return;
+        placeAt = SystemClock.uptimeMillis();
+        final Context c = getContext().getApplicationContext();
+        slow(() -> {
+            LocationManager lm = (LocationManager) c.getSystemService(Context.LOCATION_SERVICE);
+            android.location.Location best = null;
+            for (String p : lm.getProviders(true)) {
+                try {
+                    android.location.Location l = lm.getLastKnownLocation(p);
+                    if (l != null && (best == null || l.getTime() > best.getTime())) best = l;
+                } catch (SecurityException ignored) {}
+            }
+            if (best == null) { place = null; return; }
+            String name = null;
+            try {
+                List<android.location.Address> a = new android.location.Geocoder(c).getFromLocation(best.getLatitude(), best.getLongitude(), 1);
+                if (a != null && !a.isEmpty()) {
+                    android.location.Address ad = a.get(0);
+                    String area = ad.getSubLocality() != null ? ad.getSubLocality() : ad.getThoroughfare();
+                    String city = ad.getLocality() != null ? ad.getLocality() : ad.getAdminArea();
+                    name = area != null && city != null ? area + ", " + city : city != null ? city : ad.getAddressLine(0);
+                }
+            } catch (Exception ignored) {}
+            if (name == null) name = String.format(Locale.US, "%.4f, %.4f", best.getLatitude(), best.getLongitude());
+            long mins = Math.max(0, (System.currentTimeMillis() - best.getTime()) / 60_000);
+            String ago = mins < 1 ? "just now" : mins < 60 ? mins + " min ago" : (mins / 60) + " h ago";
+            placeSub = "Within about " + Math.round(best.getAccuracy()) + " m  ·  " + ago;
+            place = name;
+        });
+    }
+
+    private void findLocationApps() {
+        if (SystemClock.uptimeMillis() - appsAt < 60_000) return;
+        appsAt = SystemClock.uptimeMillis();
+        final Context c = getContext().getApplicationContext();
+        slow(() -> {
+            android.content.pm.PackageManager pm = c.getPackageManager();
+            Intent launcher = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+            java.util.List<String[]> out = new java.util.ArrayList<>();
+            java.util.Set<String> seen = new java.util.HashSet<>();
+            for (android.content.pm.ResolveInfo ri : pm.queryIntentActivities(launcher, 0)) {
+                String pkg = ri.activityInfo.packageName;
+                if (!seen.add(pkg) || pkg.equals(c.getPackageName())) continue;
+                boolean fine = pm.checkPermission(android.Manifest.permission.ACCESS_FINE_LOCATION, pkg) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+                boolean coarse = fine || pm.checkPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION, pkg) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+                if (!coarse) continue;
+                boolean always = pm.checkPermission(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION, pkg) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+                out.add(new String[]{String.valueOf(ri.loadLabel(pm)), (fine ? "Precise" : "Approximate") + (always ? "  ·  all the time" : "  ·  while in use"), pkg});
+            }
+            java.util.Collections.sort(out, (a, b) -> a[0].compareToIgnoreCase(b[0]));
+            locationApps = out;
+        });
+    }
+
+    private void buildLocation() {
+        Context c = getContext();
+        boolean on = locationOn();
+        if (holdingSwitch()) return;
+        btToggle.setOn(on, true);
+        if (on) findPlace();
+        findLocationApps();
+        java.util.List<String[]> apps = locationApps;
+        String sig = "l:" + on + place + placeSub + (apps == null ? -1 : apps.size()) + allApps;
+        if (sameRows(sig)) return;
+        if (!on) info(PanelIcons.LOCATION, "Location is off", "Apps and maps can't tell where you are", false);
+        else if (place != null) info(PanelIcons.LOCATION, place, placeSub, true);
+        else info(PanelIcons.LOCATION, "Location is on", "Finding where you are…", true);
+        if (apps == null) return;
+        heading(apps.size() + (apps.size() == 1 ? " app can use your location" : " apps can use your location"));
+        int shown = 0;
+        for (String[] a : apps) {
+            if (!allApps && shown == 6) break;
+            shown++;
+            addRow(appRow(c, a[2], a[0], a[1]));
+        }
+        if (!allApps && apps.size() > 6) {
+            TextView more = pill(c, "Show all " + apps.size(), () -> { allApps = true; rowsSig = null; rebuildDetail(); });
+            btList.addView(more, Ui.lp(-1, Ui.dpi(c, 44), Ui.dpi(c, 8)));
+        }
+    }
+
+    /** A row with an app's own icon (loaded off the main thread). */
+    private View appRow(Context c, String pkg, String name, String sub) {
+        View r = deviceRow(c, PanelIcons.LOCATION, name, sub, false);
+        r.setOnTouchListener(null);
+        r.setClickable(false);
+        final ImageView icon = new ImageView(c);
+        int p = Ui.dpi(c, 4);
+        icon.setPadding(p, p, p, p);
+        LinearLayout row = (LinearLayout) r;
+        row.removeViewAt(0);
+        row.addView(icon, 0, Ui.lp(Ui.dpi(c, 44), Ui.dpi(c, 44)));
+        final Context app = c.getApplicationContext();
+        pageWorker.execute(() -> {
+            try {
+                final android.graphics.drawable.Drawable d = app.getPackageManager().getApplicationIcon(pkg);
+                main.post(() -> icon.setImageDrawable(d));
+            } catch (Exception ignored) {}
+        });
+        return r;
+    }
+
+    // ---------------------------------------------------------------- Sound
+
+    private void buildSound() {
+        Context c = getContext();
+        final AudioManager am = (AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
+        final NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+        int m = ringerMode();
+        boolean quiet = dndOn();
+        if (sameRows("s:" + m + quiet)) return;
+        if (quiet) info(PanelIcons.DND, "Do not disturb is on", "Calls and notifications stay quiet until it's off", true);
+        choice(PanelIcons.BELL, "Ring", "Calls and notifications make a sound", m == AudioManager.RINGER_MODE_NORMAL,
+                () -> { am.setRingerMode(AudioManager.RINGER_MODE_NORMAL); showSound(); });
+        choice(PanelIcons.VIBRATE, "Vibrate", "The phone vibrates instead", m == AudioManager.RINGER_MODE_VIBRATE,
+                () -> { am.setRingerMode(AudioManager.RINGER_MODE_VIBRATE); showSound(); });
+        choice(PanelIcons.BELL_OFF, "Silent", "No sound and no vibration", m == AudioManager.RINGER_MODE_SILENT, () -> {
+            if (!nm.isNotificationPolicyAccessGranted()) { open(new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)); return; }
+            am.setRingerMode(AudioManager.RINGER_MODE_SILENT);
+            showSound();
+        });
+        heading("Volume");
+        volumeRow(am, AudioManager.STREAM_MUSIC, "Media");
+        volumeRow(am, AudioManager.STREAM_RING, "Ringtone");
+        volumeRow(am, AudioManager.STREAM_NOTIFICATION, "Notifications");
+        volumeRow(am, AudioManager.STREAM_ALARM, "Alarms");
+        volumeRow(am, AudioManager.STREAM_VOICE_CALL, "Calls");
+    }
+
+    private void volumeRow(final AudioManager am, final int stream, String name) {
+        Context c = getContext();
+        final int max = Math.max(1, am.getStreamMaxVolume(stream));
+        final HSlider s = new HSlider(c, name);
+        s.setValue(am.getStreamVolume(stream) / (float) max);
+        s.listener = (v, done) -> {
+            int to = Math.round(v * max);
+            if (to == am.getStreamVolume(stream) && !done) return;
+            try {
+                // the media and alarm volumes play a short sound when let go, so you hear the level
+                am.setStreamVolume(stream, to, done && stream != AudioManager.STREAM_VOICE_CALL ? AudioManager.FLAG_PLAY_SOUND : 0);
+            } catch (SecurityException e) {
+                say("Do not disturb is keeping this one down");
+            }
+            if (stream == AudioManager.STREAM_MUSIC) volume.setValue(to / (float) max);
+            if (done) { s.setValue(am.getStreamVolume(stream) / (float) max); showSound(); }
+        };
+        btList.addView(s, Ui.lp(-1, Ui.dpi(c, 52), Ui.dpi(c, 8)));
+    }
+
+    /**
+     * A wide slider filling with the accent colour, its name on the left and the level on the
+     * right (both turn white where the fill passes under them). Drag from anywhere; tap to jump.
+     */
+    static final class HSlider extends View {
+        interface Change { void onChange(float value, boolean done); }
+
+        Change listener;
+        private final String name;
+        private float value, downX, startValue;
+        private boolean moved;
+        private final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG), fill = new Paint(Paint.ANTI_ALIAS_FLAG),
+                text = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.RectF r = new android.graphics.RectF();
+        private final android.graphics.Path clip = new android.graphics.Path();
+
+        HSlider(Context c, String name) {
+            super(c);
+            this.name = name;
+            track.setColor(TILE);
+            fill.setColor(Ui.ACCENT);
+            text.setTextSize(Ui.dp(c, 14));
+            text.setTypeface(Ui.font(c, 600));
+        }
+
+        void setValue(float v) {
+            v = Math.max(0f, Math.min(1f, v));
+            if (Math.abs(v - value) < 0.001f) return;
+            value = v;
+            invalidate();
+        }
+
+        @Override protected void onDraw(Canvas c) {
+            float w = getWidth(), h = getHeight(), rad = Ui.dp(getContext(), 22);
+            clip.reset();
+            r.set(0, 0, w, h);
+            clip.addRoundRect(r, rad, rad, android.graphics.Path.Direction.CW);
+            c.save();
+            c.clipPath(clip);
+            c.drawRect(r, track);
+            float fx = w * value;
+            c.drawRect(0, 0, fx, h, fill);
+            float pad = Ui.dp(getContext(), 18), base = h / 2f - (text.descent() + text.ascent()) / 2f;
+            String pct = Math.round(value * 100) + "%";
+            float px = w - pad - text.measureText(pct);
+            // drawn twice: dark over the track, white over the fill
+            for (int pass = 0; pass < 2; pass++) {
+                c.save();
+                if (pass == 0) c.clipRect(fx, 0, w, h); else c.clipRect(0, 0, fx, h);
+                text.setColor(pass == 0 ? Ui.FG : Color.WHITE);
+                c.drawText(name, pad, base, text);
+                text.setColor(pass == 0 ? Ui.FG2 : 0xD9FFFFFF);
+                c.drawText(pct, px, base, text);
+                c.restore();
+            }
+            c.restore();
+        }
+
+        @Override public boolean onTouchEvent(MotionEvent e) {
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    getParent().requestDisallowInterceptTouchEvent(true); // sideways drags belong to the slider
+                    downX = e.getX();
+                    startValue = value;
+                    moved = false;
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    if (!moved && Math.abs(e.getX() - downX) < ViewConfiguration.get(getContext()).getScaledTouchSlop()) return true;
+                    moved = true;
+                    setValue(startValue + (e.getX() - downX) / Math.max(1, getWidth()));
+                    if (listener != null) listener.onChange(value, false);
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    if (!moved) setValue(e.getX() / Math.max(1, getWidth())); // a tap jumps there
+                    performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                    if (listener != null) listener.onChange(value, true);
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    if (listener != null) listener.onChange(value, true);
+                    return true;
+            }
+            return true;
+        }
+    }
+
+    // ---------------------------------------------------------------- Do not disturb
+
+    private boolean dndOn() {
+        NotificationManager nm = (NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE);
+        return nm.getCurrentInterruptionFilter() > NotificationManager.INTERRUPTION_FILTER_ALL;
+    }
+
+    /** Do not disturb on (in the given mode) or off; switching it off also drops any timer. */
+    private void setDnd(boolean on, int filter) {
+        Context c = getContext();
+        NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (!nm.isNotificationPolicyAccessGranted()) { open(new Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)); return; }
+        nm.setInterruptionFilter(on ? filter : NotificationManager.INTERRUPTION_FILTER_ALL);
+        if (!on) DndEnd.set(c, 0);
+        dnd.setActive(on);
+    }
+
+    private void buildDnd() {
+        Context c = getContext();
+        NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+        boolean on = dndOn();
+        if (holdingSwitch()) return;
+        btToggle.setOn(on, true);
+        int f = nm.getCurrentInterruptionFilter();
+        long until = on ? DndEnd.until(c) : 0;
+        if (sameRows("n:" + on + f + until)) return;
+        heading("Mode");
+        choice(PanelIcons.DND, "Priority only", "Alarms, and calls and messages from the people you choose",
+                on && f == NotificationManager.INTERRUPTION_FILTER_PRIORITY, () -> setDnd(true, NotificationManager.INTERRUPTION_FILTER_PRIORITY));
+        choice(PanelIcons.BELL, "Alarms only", "Only alarms make a sound",
+                on && f == NotificationManager.INTERRUPTION_FILTER_ALARMS, () -> setDnd(true, NotificationManager.INTERRUPTION_FILTER_ALARMS));
+        choice(PanelIcons.BELL_OFF, "Total silence", "Nothing makes a sound, not even alarms",
+                on && f == NotificationManager.INTERRUPTION_FILTER_NONE, () -> setDnd(true, NotificationManager.INTERRUPTION_FILTER_NONE));
+        heading("For how long");
+        final int mode = on ? f : NotificationManager.INTERRUPTION_FILTER_PRIORITY;
+        java.text.DateFormat tf = android.text.format.DateFormat.getTimeFormat(c);
+        choice(PanelIcons.DND, "Until you turn it off", "No timer", on && until == 0, () -> { setDnd(true, mode); DndEnd.set(getContext(), 0); });
+        for (int hours : new int[]{1, 2}) {
+            long end = System.currentTimeMillis() + hours * 3_600_000L;
+            boolean chosen = on && until > 0 && hoursChosen == hours;
+            choice(PanelIcons.DND, hours == 1 ? "For 1 hour" : "For " + hours + " hours", "Until " + tf.format(new java.util.Date(end)), chosen,
+                    () -> { setDnd(true, mode); hoursChosen = hours; DndEnd.set(getContext(), System.currentTimeMillis() + hours * 3_600_000L); });
+        }
+        Calendar morning = Calendar.getInstance();
+        morning.add(Calendar.DAY_OF_YEAR, morning.get(Calendar.HOUR_OF_DAY) < 7 ? 0 : 1);
+        morning.set(Calendar.HOUR_OF_DAY, 7); morning.set(Calendar.MINUTE, 0); morning.set(Calendar.SECOND, 0);
+        final long am7 = morning.getTimeInMillis();
+        choice(PanelIcons.DND, "Until morning", "Until " + tf.format(new java.util.Date(am7)), on && until == am7 && hoursChosen == 0,
+                () -> { setDnd(true, mode); hoursChosen = 0; DndEnd.set(getContext(), am7); });
+        if (on && until > 0) info(PanelIcons.DND, "Ends at " + tf.format(new java.util.Date(until)), "Then everything rings again", false);
+    }
+
+    private int hoursChosen;
+
+    /** Switches Do not disturb off when its timer runs out (the alarm survives the panel). */
+    public static final class DndEnd extends android.content.BroadcastReceiver {
+        static long until(Context c) { return c.getSharedPreferences("panel", Context.MODE_PRIVATE).getLong("dnd_until", 0); }
+
+        /** at: when to switch it off (0: no timer). */
+        static void set(Context c, long at) {
+            c.getSharedPreferences("panel", Context.MODE_PRIVATE).edit().putLong("dnd_until", at).apply();
+            android.app.AlarmManager alarms = (android.app.AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+            android.app.PendingIntent pi = android.app.PendingIntent.getBroadcast(c, 7, new Intent(c, DndEnd.class),
+                    android.app.PendingIntent.FLAG_IMMUTABLE | android.app.PendingIntent.FLAG_UPDATE_CURRENT);
+            alarms.cancel(pi);
+            if (at <= 0) return;
+            // on time to the minute when exact alarms are allowed (granted over adb); otherwise
+            // the closest Android allows apps: within ten minutes
+            if (android.os.Build.VERSION.SDK_INT < 31 || alarms.canScheduleExactAlarms())
+                alarms.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, at, pi);
+            else alarms.setWindow(android.app.AlarmManager.RTC_WAKEUP, at, 10 * 60_000L, pi);
+        }
+
+        @Override public void onReceive(Context c, Intent i) {
+            long at = until(c);
+            if (at == 0 || at > System.currentTimeMillis() + 60_000) return; // cancelled, or moved later
+            c.getSharedPreferences("panel", Context.MODE_PRIVATE).edit().putLong("dnd_until", 0).apply();
+            NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm.isNotificationPolicyAccessGranted()) nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL);
+        }
+    }
+
+    // ---------------------------------------------------------------- Battery
+
+    private boolean saverOn() {
+        Context c = getContext();
+        return ((PowerManager) c.getSystemService(Context.POWER_SERVICE)).isPowerSaveMode()
+                || Settings.System.getInt(c.getContentResolver(), "SmartModeStatus", 1) == 4;
+    }
+
+    private void buildBattery() {
+        Context c = getContext();
+        boolean on = saverOn();
+        if (holdingSwitch()) return;
+        btToggle.setOn(on, true);
+        Intent b = c.getApplicationContext().registerReceiver(null, new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        if (b == null) return;
+        int level = Math.round(100f * b.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, 0) / Math.max(1, b.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100)));
+        int status = b.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, 0);
+        int plug = b.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0);
+        float temp = b.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, 0) / 10f;
+        int health = b.getIntExtra(android.os.BatteryManager.EXTRA_HEALTH, 0);
+        boolean charging = status == android.os.BatteryManager.BATTERY_STATUS_CHARGING;
+        boolean full = status == android.os.BatteryManager.BATTERY_STATUS_FULL || level >= 100;
+        long left = -1;
+        try { left = ((android.os.BatteryManager) c.getSystemService(Context.BATTERY_SERVICE)).computeChargeTimeRemaining(); } catch (Exception ignored) {}
+        String sig = "y:" + on + level + status + plug + Math.round(temp) + health + (left / 60_000);
+        if (sameRows(sig)) return;
+        String how = plug == android.os.BatteryManager.BATTERY_PLUGGED_AC ? "charger"
+                : plug == android.os.BatteryManager.BATTERY_PLUGGED_USB ? "USB"
+                : plug == android.os.BatteryManager.BATTERY_PLUGGED_WIRELESS ? "wireless charger" : null;
+        String sub;
+        if (full && how != null) sub = "Full  ·  on " + how;
+        else if (charging) sub = "Charging" + (how != null ? " on " + how : "") + (left > 0 ? "  ·  full in " + duration(left) : "");
+        else if (how != null) sub = "Plugged in, not charging";
+        else sub = "On battery";
+        info(PanelIcons.BATTERY, level + "%", sub, charging || full);
+        if (on) info(PanelIcons.BATTERY, "Power saving is on", "Background activity and effects are reduced to last longer", true);
+        heading("Health");
+        String hs = health == android.os.BatteryManager.BATTERY_HEALTH_GOOD ? "Good"
+                : health == android.os.BatteryManager.BATTERY_HEALTH_OVERHEAT ? "Too hot"
+                : health == android.os.BatteryManager.BATTERY_HEALTH_COLD ? "Too cold"
+                : health == android.os.BatteryManager.BATTERY_HEALTH_DEAD ? "Worn out" : "Normal";
+        info(PanelIcons.BATTERY, hs, "Battery condition", false);
+        info(PanelIcons.SUN, String.format(Locale.getDefault(), "%.1f°C", temp),
+                temp >= 40 ? "Warm: let it cool before heavy use" : "Temperature", temp >= 40);
+    }
+
+    private static String duration(long ms) {
+        long m = Math.max(1, ms / 60_000);
+        return m < 60 ? m + " min" : (m / 60) + " h " + (m % 60) + " min";
+    }
+
+    // ---------------------------------------------------------------- Torch
+
+    private int torchMax() {
+        if (torchId == null || android.os.Build.VERSION.SDK_INT < 33) return 1;
+        try {
+            Integer m = cameras.getCameraCharacteristics(torchId).get(CameraCharacteristics.FLASH_INFO_STRENGTH_MAXIMUM_LEVEL);
+            return m == null ? 1 : m;
+        } catch (Exception e) { return 1; }
+    }
+
+    private void buildTorch() {
+        Context c = getContext();
+        boolean on = torchOn;
+        if (holdingSwitch()) return;
+        btToggle.setOn(on, true);
+        final int max = torchMax();
+        if (sameRows("t:" + on + max)) return;
+        info(PanelIcons.TORCH, on ? "Torch is on" : "Torch is off", on ? "Using the back camera's light" : "Switch it on above", on);
+        if (max <= 1) { addRow(btMessage(c, "This phone's torch has one brightness")); return; }
+        heading("Brightness");
+        final HSlider s = new HSlider(c, "Brightness");
+        int lv = max;
+        try { if (on && android.os.Build.VERSION.SDK_INT >= 33) lv = cameras.getTorchStrengthLevel(torchId); } catch (Exception ignored) {}
+        s.setValue(lv / (float) max);
+        s.listener = (v, done) -> {
+            if (android.os.Build.VERSION.SDK_INT < 33) return;
+            int to = Math.max(1, Math.round(v * max)); // 0 would be off: the switch does that
+            try { cameras.turnOnTorchWithStrengthLevel(torchId, to); } catch (Exception ignored) {}
+        };
+        btList.addView(s, Ui.lp(-1, Ui.dpi(c, 52), Ui.dpi(c, 8)));
     }
 
     // ---------------------------------------------------------------- Wi-Fi
@@ -1207,7 +1893,7 @@ final class ControlPanel extends FrameLayout {
         if (SystemClock.uptimeMillis() - lastScan > 20_000) {
             lastScan = SystemClock.uptimeMillis();
             try { wm.startScan(); } catch (Exception ignored) {}
-            main.postDelayed(() -> { if (page == BT && detailWifi && progress > 0f) buildWifi(); }, 3500);
+            main.postDelayed(() -> { if (page == BT && detail == D_WIFI && progress > 0f) buildWifi(); }, 3500);
         }
         List<android.net.wifi.ScanResult> results;
         try { results = wm.getScanResults(); } catch (SecurityException e) { results = null; }
@@ -1269,7 +1955,7 @@ final class ControlPanel extends FrameLayout {
             }
             if (result == PanelService.NOT_FOUND) say(ssid + " is out of range");
             // give it a few seconds to connect, then show the truth
-            main.postDelayed(() -> { connecting = null; if (page == BT && detailWifi) buildWifi(); refreshStates(); }, 4000);
+            main.postDelayed(() -> { connecting = null; if (page == BT && detail == D_WIFI) buildWifi(); refreshStates(); }, 4000);
         });
     }
 
@@ -1369,7 +2055,7 @@ final class ControlPanel extends FrameLayout {
                 PanelService.pressInSettings(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS), dn, "OK", res -> {
                     if (res == PanelService.NEEDS_YOU) { btBusy = null; close(); return; }
                     if (res == PanelService.NOT_FOUND) say(dn + " isn't nearby");
-                    main.postDelayed(() -> { btBusy = null; if (page == BT && !detailWifi) buildBt(); }, 3500);
+                    main.postDelayed(() -> { btBusy = null; if (page == BT && detail == D_BT) buildBt(); }, 3500);
                 });
             });
             btList.addView(r, Ui.lp(-1, -2, btList.getChildCount() == 0 ? 0 : Ui.dpi(c, 8)));
@@ -1447,7 +2133,7 @@ final class ControlPanel extends FrameLayout {
         }
         page = p;
         resetPageLooks();
-        setIfChanged(time, p == NOTIFS ? "Notifications" : p == BT ? (detailWifi ? "Wi-Fi" : "Bluetooth") : "Controls");
+        setIfChanged(time, p == NOTIFS ? "Notifications" : p == BT ? detailName() : "Controls");
         scroll.setVisibility(p == CONTROLS ? VISIBLE : GONE);
         notifScroll.setVisibility(p == NOTIFS ? VISIBLE : GONE);
         btScroll.setVisibility(p == BT ? VISIBLE : GONE);
@@ -2739,6 +3425,10 @@ final class ControlPanel extends FrameLayout {
         interface Saved { void onOrder(String ids); }
 
         Saved saved;
+        /** Buttons with a page of their own: held and let go without moving, it opens. */
+        final java.util.Map<Round, Runnable> pages = new java.util.HashMap<>();
+        private float liftX, liftY;
+        private boolean moved;
         private final java.util.List<Round> order = new java.util.ArrayList<>();
         private final LinearLayout[] rows = new LinearLayout[4];
         private Round dragged;
@@ -2783,6 +3473,9 @@ final class ControlPanel extends FrameLayout {
 
         private void lift(Round r) {
             dragged = r;
+            liftX = lastX;
+            liftY = lastY;
+            moved = false;
             getParent().requestDisallowInterceptTouchEvent(true);
             r.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
             LinearLayout row = (LinearLayout) r.getParent();
@@ -2854,6 +3547,12 @@ final class ControlPanel extends FrameLayout {
                         dragged.setScaleY(1.15f);
                         dragged.setAlpha(1f);
                     }
+                    // a held finger always shakes a little: it only starts moving past the touch slop
+                    if (!moved && Math.hypot(lastX - liftX, lastY - liftY) < ViewConfiguration.get(getContext()).getScaledTouchSlop() * 1.5f) {
+                        follow();
+                        return true;
+                    }
+                    moved = true;
                     int to = slotAt(lastX, lastY), from = order.indexOf(dragged);
                     if (to != from) {
                         order.remove(dragged);
@@ -2872,6 +3571,8 @@ final class ControlPanel extends FrameLayout {
                     r.animate().translationX(0f).translationY(0f).scaleX(1f).scaleY(1f).setDuration(180)
                             .setInterpolator(Ui.EMPHASIZED).start();
                     invalidate();
+                    Runnable page = pages.get(r);
+                    if (!moved && page != null && e.getActionMasked() == MotionEvent.ACTION_UP) { page.run(); return true; }
                     StringBuilder ids = new StringBuilder();
                     for (Round x : order) ids.append(ids.length() == 0 ? "" : ",").append(x.id);
                     if (saved != null) saved.onOrder(ids.toString());
