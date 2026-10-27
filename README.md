@@ -16,8 +16,9 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   echo of that shape. Every app gets a gentle variation seeded from its name. Shadows are baked in.
   Real adaptive icons are used even on Honor, whose icon theme normally swaps them for pre-shaped bitmaps
   (see `Icons.raw`: adaptive icons are inflated from their XML, bitmap icons decoded from raw PNG bytes).
-- **Long-press an app**: a card with the app's own shortcuts (round icons, e.g. recent WhatsApp chats),
-  round Info / Hide / Uninstall buttons and Add to dock (tap the dashed slot you want). Hidden apps
+- **Long-press an app**: a small solid card with the app's own shortcuts (e.g. recent WhatsApp chats)
+  and one row of labelled buttons: Dock (then tap the dashed slot you want), Info, Hide and Uninstall
+  (in the dock: Info and Remove). Apps without shortcuts get just the button row. Hidden apps
   stay out of the drawer but still come up in search; type “hidden” to list them.
   Single-colour shortcut icons (Facebook's, for example) are tinted so they show on the dark card.
 - **Swipe down on home** opens the notifications page; **double-tap** empty space to lock the phone.

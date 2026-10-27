@@ -984,14 +984,12 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         int[] loc = new int[2];
         grid.getLocationInWindow(loc);
         List<Popup.Btn> btns = new ArrayList<>();
-        btns.add(new Popup.Btn(Ui.G_INFO, Popup.NORMAL, () -> appInfo(e)));
-        btns.add(new Popup.Btn(Ui.G_HIDE, Popup.NORMAL, () -> setHidden(e, true)));
-        btns.add(new Popup.Btn(Ui.G_TRASH, Popup.DANGER, () -> startSafely(
+        btns.add(new Popup.Btn(Ui.G_DOCK, "Dock", Popup.NORMAL, () -> startPlacing(e)));
+        btns.add(new Popup.Btn(Ui.G_INFO, "Info", Popup.NORMAL, () -> appInfo(e)));
+        btns.add(new Popup.Btn(Ui.G_HIDE, "Hide", Popup.NORMAL, () -> setHidden(e, true)));
+        btns.add(new Popup.Btn(Ui.G_TRASH, "Uninstall", Popup.DANGER, () -> startSafely(
                 new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + e.cn.getPackageName())), null)));
-        Popup.Item primary = new Popup.Item("Add to dock", null, () -> startPlacing(e));
-        primary.glyph = Ui.G_DOCK;
-        primary.tone = Popup.ACCENT;
-        new Popup(this, e.label, e.icon, btns, shortcutItems(e), primary, loc[0] + cx, loc[1] + cy, grid.iconSizePx()).open();
+        new Popup(this, e.label, e.icon, btns, shortcutItems(e), null, loc[0] + cx, loc[1] + cy, grid.iconSizePx()).open();
     }
 
     private void dockMenu(final AppGridView.AppEntry e, final int index, float cx, float cy) {
@@ -999,16 +997,14 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         int[] loc = new int[2];
         dock.getLocationInWindow(loc);
         List<Popup.Btn> btns = new ArrayList<>();
-        btns.add(new Popup.Btn(Ui.G_INFO, Popup.NORMAL, () -> appInfo(e)));
-        Popup.Item primary = new Popup.Item("Remove from dock", null, () -> {
+        btns.add(new Popup.Btn(Ui.G_INFO, "Info", Popup.NORMAL, () -> appInfo(e)));
+        btns.add(new Popup.Btn(Ui.G_MINUS, "Remove", Popup.DANGER, () -> {
             dockEntries[index] = null;
             saveDock();
             rebuildDockList();
             dock.setItems(dockShown);
-        });
-        primary.glyph = Ui.G_MINUS;
-        primary.tone = Popup.DANGER;
-        new Popup(this, e.label, e.icon, btns, shortcutItems(e), primary, loc[0] + cx, loc[1] + cy, dock.iconSizePx()).open();
+        }));
+        new Popup(this, e.label, e.icon, btns, shortcutItems(e), null, loc[0] + cx, loc[1] + cy, dock.iconSizePx()).open();
     }
 
     private static final ExecutorService shortcutWorker = Executors.newSingleThreadExecutor();
@@ -1405,8 +1401,9 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
         static final class Btn {
             final int glyph, tone;
+            final String label;
             final Runnable action;
-            Btn(int glyph, int tone, Runnable action) { this.glyph = glyph; this.tone = tone; this.action = action; }
+            Btn(int glyph, String label, int tone, Runnable action) { this.glyph = glyph; this.label = label; this.tone = tone; this.action = action; }
         }
 
         private final LinearLayout card;
@@ -1426,62 +1423,36 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 @Override public boolean hasOverlappingRendering() { return false; }
             };
             card.setOrientation(LinearLayout.VERTICAL);
-            card.setPadding(0, Ui.dpi(c, 6), 0, Ui.dpi(c, 10));
-            card.setBackground(Ui.frost(card, Ui.dp(c, 28)));
+            int cp = Ui.dpi(c, 6);
+            card.setPadding(cp, cp, cp, cp);
+            // a solid card: frosted, it vanished into the blurred drawer behind it
+            card.setBackground(Ui.glass(Ui.dark ? 0xFF262626 : 0xFFFFFFFF, Ui.dp(c, 24)));
             card.setClipToOutline(true);
 
-            // header: icon + name + round buttons
-            LinearLayout head = new LinearLayout(c);
-            head.setGravity(Gravity.CENTER_VERTICAL);
-            head.setPadding(Ui.dpi(c, 14), Ui.dpi(c, 8), Ui.dpi(c, 10), Ui.dpi(c, 8));
-            if (appIcon != null) {
-                android.widget.ImageView iv = new android.widget.ImageView(c);
-                iv.setImageBitmap(appIcon);
-                LinearLayout.LayoutParams ip = Ui.lp(Ui.dpi(c, 40), Ui.dpi(c, 40));
-                ip.rightMargin = Ui.dpi(c, 10);
-                head.addView(iv, ip);
+            // a titled list (hidden apps) says what it is; an app's menu doesn't need to, the
+            // app's own icon and name are right beside it
+            if (appIcon == null && heading != null) {
+                TextView name = Ui.text(c, heading, 15, Ui.FG, true);
+                name.setTypeface(Ui.font(c, 600));
+                name.setPadding(Ui.dpi(c, 12), Ui.dpi(c, 8), Ui.dpi(c, 12), Ui.dpi(c, 6));
+                card.addView(name, Ui.lp(-1, -2));
             }
-            TextView name = Ui.text(c, heading, 16.5f, Ui.FG, true);
-            name.setTypeface(Ui.font(c, 600));
-            name.setSingleLine(true);
-            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            head.addView(name, new LinearLayout.LayoutParams(0, -2, 1f));
-            for (final Btn b : btns) {
-                Ui.Glyph g = new Ui.Glyph(c, b.glyph, b.tone == DANGER ? Ui.DANGER : Ui.FG);
-                g.setBackground(Ui.round(b.tone == DANGER ? Ui.DANGER_BG : Ui.FILL, Ui.dp(c, 20)));
-                g.setPadding(Ui.dpi(c, 10), Ui.dpi(c, 10), Ui.dpi(c, 10), Ui.dpi(c, 10));
-                g.setClickable(true);
-                Ui.pressable(g);
-                g.setOnClickListener(v -> { close(); b.action.run(); });
-                LinearLayout.LayoutParams bp = Ui.lp(Ui.dpi(c, 40), Ui.dpi(c, 40));
-                bp.leftMargin = Ui.dpi(c, 6);
-                head.addView(g, bp);
-            }
-            card.addView(head, Ui.lp(-1, -2));
 
-            // shortcuts / list rows
-            if (!items.isEmpty()) {
-                View line = new View(c);
-                line.setBackgroundColor(Ui.LINE);
-                LinearLayout.LayoutParams dl = Ui.lp(-1, Math.max(1, Ui.dpi(c, 1)));
-                dl.leftMargin = dl.rightMargin = Ui.dpi(c, 16);
-                dl.bottomMargin = Ui.dpi(c, 4);
-                card.addView(line, dl);
-            }
+            // quick actions (shortcuts): compact rows
             for (final Item it : items) {
                 LinearLayout row = new LinearLayout(c);
                 row.setGravity(Gravity.CENTER_VERTICAL);
-                row.setPadding(Ui.dpi(c, 12), 0, Ui.dpi(c, 14), 0);
+                row.setPadding(Ui.dpi(c, 10), 0, Ui.dpi(c, 12), 0);
                 row.setClickable(true);
                 row.setBackground(Ui.round(0x00000000, Ui.dp(c, 16)));
                 if (it.icon != null) {
                     android.widget.ImageView iv = new android.widget.ImageView(c);
                     iv.setImageDrawable(it.icon);
-                    LinearLayout.LayoutParams ip = Ui.lp(Ui.dpi(c, 32), Ui.dpi(c, 32));
+                    LinearLayout.LayoutParams ip = Ui.lp(Ui.dpi(c, 26), Ui.dpi(c, 26));
                     ip.rightMargin = Ui.dpi(c, 12);
                     row.addView(iv, ip);
                 }
-                TextView t = Ui.text(c, it.label, 15.5f, Ui.FG, false);
+                TextView t = Ui.text(c, it.label, 14.5f, Ui.FG, false);
                 t.setSingleLine(true);
                 t.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 row.addView(t, new LinearLayout.LayoutParams(0, -2, 1f));
@@ -1492,22 +1463,39 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                     return false;
                 });
                 row.setOnClickListener(v -> { close(); it.action.run(); });
-                LinearLayout.LayoutParams rp = Ui.lp(-1, Ui.dpi(c, 50));
-                rp.leftMargin = rp.rightMargin = Ui.dpi(c, 6);
-                card.addView(row, rp);
+                card.addView(row, Ui.lp(-1, Ui.dpi(c, 44)));
             }
 
-            // one full-width action
+            // the app's own actions: one tidy row of small buttons, each with a word under it
+            if (!btns.isEmpty()) {
+                LinearLayout tray = new LinearLayout(c);
+                tray.setBackground(Ui.round(Ui.FILL, Ui.dp(c, 18)));
+                for (final Btn b : btns) {
+                    LinearLayout cell = new LinearLayout(c);
+                    cell.setOrientation(LinearLayout.VERTICAL);
+                    cell.setGravity(Gravity.CENTER);
+                    int fg = b.tone == DANGER ? Ui.DANGER : Ui.FG;
+                    cell.addView(new Ui.Glyph(c, b.glyph, fg), Ui.lp(Ui.dpi(c, 20), Ui.dpi(c, 20)));
+                    TextView cap = Ui.text(c, b.label, 11.5f, b.tone == DANGER ? Ui.DANGER : Ui.FG2, false);
+                    cap.setSingleLine(true);
+                    cell.addView(cap, Ui.lp(-2, -2, Ui.dpi(c, 5)));
+                    cell.setClickable(true);
+                    Ui.pressable(cell);
+                    cell.setOnClickListener(v -> { close(); b.action.run(); });
+                    tray.addView(cell, new LinearLayout.LayoutParams(0, Ui.dpi(c, 60), 1f));
+                }
+                card.addView(tray, Ui.lp(-1, -2, items.isEmpty() ? 0 : Ui.dpi(c, 6)));
+            }
+
+            // one full-width action (lists that have one)
             if (primary != null) {
                 LinearLayout pill = new LinearLayout(c);
                 pill.setGravity(Gravity.CENTER);
                 int bg = primary.tone == DANGER ? Ui.DANGER_BG : primary.tone == ACCENT ? Ui.ACCENT : Ui.FILL;
                 int fg = primary.tone == DANGER ? Ui.DANGER : primary.tone == ACCENT ? Color.WHITE : Ui.FG;
-                pill.setBackground(Ui.round(bg, Ui.dp(c, 23)));
-                if (primary.glyph >= 0) {
-                    pill.addView(new Ui.Glyph(c, primary.glyph, fg), Ui.lp(Ui.dpi(c, 20), Ui.dpi(c, 20)));
-                }
-                TextView pt = Ui.text(c, primary.label, 15, fg, true);
+                pill.setBackground(Ui.round(bg, Ui.dp(c, 18)));
+                if (primary.glyph >= 0) pill.addView(new Ui.Glyph(c, primary.glyph, fg), Ui.lp(Ui.dpi(c, 18), Ui.dpi(c, 18)));
+                TextView pt = Ui.text(c, primary.label, 14, fg, true);
                 pt.setTypeface(Ui.font(c, 600));
                 LinearLayout.LayoutParams ptp = Ui.lp(-2, -2);
                 ptp.leftMargin = Ui.dpi(c, 8);
@@ -1515,12 +1503,10 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 pill.setClickable(true);
                 Ui.pressable(pill);
                 pill.setOnClickListener(v -> { close(); primary.action.run(); });
-                LinearLayout.LayoutParams pp = Ui.lp(-1, Ui.dpi(c, 46), Ui.dpi(c, items.isEmpty() ? 4 : 8));
-                pp.leftMargin = pp.rightMargin = Ui.dpi(c, 12);
-                card.addView(pill, pp);
+                card.addView(pill, Ui.lp(-1, Ui.dpi(c, 42), Ui.dpi(c, 6)));
             }
 
-            int w = Ui.dpi(c, 280);
+            int w = Ui.dpi(c, btns.size() <= 2 && items.isEmpty() ? 160 : 236);
             card.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.UNSPECIFIED);
             int ch = card.getMeasuredHeight();
             int screenW = c.getResources().getDisplayMetrics().widthPixels;
