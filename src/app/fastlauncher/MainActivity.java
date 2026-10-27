@@ -552,6 +552,10 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         });
     }
 
+    /** The drawer's shape on screen while it opens: grows from around the dock to the whole screen. */
+    private final android.graphics.RectF drawerShape = new android.graphics.RectF();
+    private float sheetRadius;
+
     private void buildDrawer() {
         blurView = new BlurView(this);
         blurView.setVisibility(View.INVISIBLE);
@@ -565,6 +569,17 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         drawer.setBackgroundColor(0x59000000);
         drawer.setVisibility(View.INVISIBLE);
         root.addView(drawer, new FrameLayout.LayoutParams(-1, -1));
+        android.view.ViewOutlineProvider sheetShape = new android.view.ViewOutlineProvider() {
+            @Override public void getOutline(View v, android.graphics.Outline o) {
+                float dy = v.getTop() + v.getTranslationY();
+                o.setRoundRect(Math.round(drawerShape.left - v.getLeft()), Math.round(drawerShape.top - dy),
+                        Math.round(drawerShape.right - v.getLeft()), Math.round(drawerShape.bottom - dy), sheetRadius);
+            }
+        };
+        blurView.setOutlineProvider(sheetShape);
+        blurView.setClipToOutline(true);
+        drawer.setOutlineProvider(sheetShape);
+        drawer.setClipToOutline(true);
 
         grid = new AppGridView(this, 5, 17, 97, 48, 12, 12, true, true);
         grid.setListener(new AppGridView.Listener() {
@@ -1598,11 +1613,11 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 drawer.setVisibility(View.VISIBLE);
             }
             if (blurView.hasBlur() && blurView.getVisibility() != View.VISIBLE) blurView.setVisibility(View.VISIBLE);
-            // the sheet travels a third of the screen while the rows cascade in behind it
-            float e = 1f - progress;
-            drawer.setTranslationY(e * travel() * 0.33f - over);
+            // the drawer grows out of the dock: a rounded sheet starts where the dock sits and
+            // expands to the whole screen, the apps riding up with its top edge
+            layDrawer();
             drawer.setAlpha(Math.min(1f, progress * 2.2f));
-            blurView.setAlpha(Math.min(1f, progress * 1.6f));
+            blurView.setAlpha(Math.min(1f, progress * 5f));
             float ha = 1f - Math.min(1f, progress * 1.7f);
             home.setAlpha(ha);
             int hv = ha <= 0f ? View.INVISIBLE : View.VISIBLE;
@@ -1612,6 +1627,21 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             home.setScaleY(sc);
         }
 
+        private float lerp(float a, float b, float t) { return a + (b - a) * t; }
+
+        /** Shape and place the sheet for the current progress (and any push past open). */
+        private void layDrawer() {
+            float t = progress, w = getWidth(), h = getHeight();
+            float m = dp * 10;
+            float top = home.getTop() + dock.getTop() - m, bottom = home.getTop() + dock.getBottom() - m * 0.5f;
+            if (dock.getHeight() == 0) { top = h * 0.8f; bottom = h - m; }
+            drawerShape.set(lerp(m, 0, t), lerp(top, 0, t) - over, lerp(w - m, w, t), lerp(bottom, h, t));
+            sheetRadius = lerp(dp * 30, dp * 12, t);
+            drawer.setTranslationY(drawerShape.top * 0.9f);
+            drawer.invalidateOutline();
+            blurView.invalidateOutline();
+        }
+
         /** Pushed up past fully open: the drawer gives a little (pixels), then springs back. */
         private float over;
         private ValueAnimator overAnim;
@@ -1619,7 +1649,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         private void setOver(float px) {
             if (overAnim != null) overAnim.cancel();
             over = px;
-            if (progress > 0f) drawer.setTranslationY((1f - progress) * travel() * 0.33f - over);
+            if (progress > 0f) layDrawer();
         }
 
         private void releaseOver() {
@@ -1629,7 +1659,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             overAnim.setInterpolator(Ui.EMPHASIZED);
             overAnim.addUpdateListener(a -> {
                 over = (Float) a.getAnimatedValue();
-                if (progress > 0f) drawer.setTranslationY((1f - progress) * travel() * 0.33f - over);
+                if (progress > 0f) layDrawer();
             });
             overAnim.start();
         }
