@@ -552,10 +552,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         });
     }
 
-    /** The drawer's shape on screen while it opens: grows from around the dock to the whole screen. */
-    private final android.graphics.RectF drawerShape = new android.graphics.RectF();
-    private float sheetRadius;
-
     private void buildDrawer() {
         blurView = new BlurView(this);
         blurView.setVisibility(View.INVISIBLE);
@@ -569,17 +565,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         drawer.setBackgroundColor(0x59000000);
         drawer.setVisibility(View.INVISIBLE);
         root.addView(drawer, new FrameLayout.LayoutParams(-1, -1));
-        android.view.ViewOutlineProvider sheetShape = new android.view.ViewOutlineProvider() {
-            @Override public void getOutline(View v, android.graphics.Outline o) {
-                float dy = v.getTop() + v.getTranslationY();
-                o.setRoundRect(Math.round(drawerShape.left - v.getLeft()), Math.round(drawerShape.top - dy),
-                        Math.round(drawerShape.right - v.getLeft()), Math.round(drawerShape.bottom - dy), sheetRadius);
-            }
-        };
-        blurView.setOutlineProvider(sheetShape);
-        blurView.setClipToOutline(true);
-        drawer.setOutlineProvider(sheetShape);
-        drawer.setClipToOutline(true);
+
 
         grid = new AppGridView(this, 5, 17, 97, 48, 12, 12, true, true);
         grid.setListener(new AppGridView.Listener() {
@@ -1598,7 +1584,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             boolean half = progress >= 0.5f;
             if (half == barsDark) { barsDark = !half; updateBars(); }
             drawerOpen = half;
-            grid.setReveal(progress);
+            grid.setReveal(1f); // the apps move as one, with the thumb
             if (progress <= 0f) {
                 drawer.setVisibility(View.INVISIBLE);
                 blurView.setVisibility(View.INVISIBLE);
@@ -1606,6 +1592,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 if (home.getVisibility() != View.VISIBLE) home.setVisibility(View.VISIBLE);
                 home.setScaleX(1f);
                 home.setScaleY(1f);
+                home.setTranslationY(0f);
                 return;
             }
             if (drawer.getVisibility() != View.VISIBLE) {
@@ -1613,11 +1600,18 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 drawer.setVisibility(View.VISIBLE);
             }
             if (blurView.hasBlur() && blurView.getVisibility() != View.VISIBLE) blurView.setVisibility(View.VISIBLE);
-            // the drawer grows out of the dock: a rounded sheet starts where the dock sits and
-            // expands to the whole screen, the apps riding up with its top edge
+            // like the control center: the apps come up under the thumb, one to one with the finger,
+            // fading in as they come; the background blurs in place; home (clock, date, dock)
+            // fades away behind, settling back a little
             layDrawer();
-            drawer.setAlpha(Math.min(1f, progress * 2.2f));
-            blurView.setAlpha(Math.min(1f, progress * 5f));
+            drawer.setAlpha(Math.min(1f, progress * 1.4f));
+            if (drawer.getBackground() != null) drawer.getBackground().setAlpha(Math.round(255 * Math.min(1f, progress * 1.5f)));
+            blurView.setAlpha(Math.min(1f, progress * 1.5f));
+            if (!searching) {
+                title.setAlpha(1f);
+                btnSearch.setAlpha(1f);
+            }
+
             float ha = 1f - Math.min(1f, progress * 1.7f);
             home.setAlpha(ha);
             int hv = ha <= 0f ? View.INVISIBLE : View.VISIBLE;
@@ -1625,21 +1619,12 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             float sc = 1f - 0.08f * progress;
             home.setScaleX(sc);
             home.setScaleY(sc);
+            home.setTranslationY(0f);
         }
 
-        private float lerp(float a, float b, float t) { return a + (b - a) * t; }
-
-        /** Shape and place the sheet for the current progress (and any push past open). */
+        /** Where the apps are: exactly as far below their place as the finger still has to go. */
         private void layDrawer() {
-            float t = progress, w = getWidth(), h = getHeight();
-            float m = dp * 10;
-            float top = home.getTop() + dock.getTop() - m, bottom = home.getTop() + dock.getBottom() - m * 0.5f;
-            if (dock.getHeight() == 0) { top = h * 0.8f; bottom = h - m; }
-            drawerShape.set(lerp(m, 0, t), lerp(top, 0, t) - over, lerp(w - m, w, t), lerp(bottom, h, t));
-            sheetRadius = lerp(dp * 30, dp * 12, t);
-            drawer.setTranslationY(drawerShape.top * 0.9f);
-            drawer.invalidateOutline();
-            blurView.invalidateOutline();
+            drawer.setTranslationY((1f - progress) * travel() * 0.45f - over);
         }
 
         /** Pushed up past fully open: the drawer gives a little (pixels), then springs back. */
@@ -1681,14 +1666,18 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             float dist = Math.abs(target - progress);
             if (dist < 0.002f) { setProgress(target); endLayers(); return; }
             long dur = Math.round(130 + 170 * dist);
+            android.animation.TimeInterpolator curve = Ui.EMPHASIZED;
             if (velocity > 200f) {
-                long byVel = Math.round(dist * travel() * 0.45f / velocity * 1000f * 1.6f);
-                dur = Math.max(110, Math.min(dur, byVel));
+                // a flick carries on at the finger's own speed and eases to a stop there: a
+                // decelerating curve starts at twice its average speed, so the time is 2 x d / v
+                float px = dist * travel() * 0.45f;
+                dur = Math.max(120, Math.min(420, Math.round(2f * px / velocity * 1000f)));
+                curve = new android.view.animation.DecelerateInterpolator(1f);
             }
             beginLayers();
             anim = ValueAnimator.ofFloat(progress, target);
             anim.setDuration(dur);
-            anim.setInterpolator(Ui.EMPHASIZED);
+            anim.setInterpolator(curve);
             anim.addUpdateListener(a -> setProgress((Float) a.getAnimatedValue()));
             anim.addListener(new AnimatorListenerAdapter() {
                 @Override public void onAnimationEnd(Animator a) { post(Root.this::endLayers); }
@@ -1749,6 +1738,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 boolean closing = progress >= 0.5f && dy > 0 && grid.atTop() && !searching;
                 if (opening || closing) {
                     dragging = true;
+                    grid.setRevealOrigin(downX); // the apps ripple out from (and back into) the thumb
                     removeCallbacks(homeLongPress);
                     // start exactly where the finger is: no jump of `slop` pixels
                     downY = ev.getY() - Math.signum(dy) * slop * 0.5f;

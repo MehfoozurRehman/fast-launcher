@@ -190,6 +190,17 @@ final class AppGridView extends View {
         invalidate();
     }
 
+    /** Where the wave of icons starts (the thumb's x; it rises from the bottom edge). */
+    private float originX = -1f;
+
+    void setRevealOrigin(float x) { originX = x; }
+
+    /** Ease out with a small overshoot: past 1 a little, then back, like something settling. */
+    private static float settle(float t) {
+        float c1 = 1.35f, c3 = c1 + 1f, u = t - 1f;
+        return 1f + c3 * u * u * u + c1 * u * u;
+    }
+
     private String fit(String s, float maxW) {
         if (textPaint.measureText(s) <= maxW) return s;
         int n = textPaint.breakText(s, true, maxW - textPaint.measureText("…"), null);
@@ -243,22 +254,31 @@ final class AppGridView extends View {
         for (int r = firstRow; r <= lastRow; r++) {
             float top = topPad + r * rowH - off;
             int rowAlpha = 255;
-            if (revealing) {
-                // each row lags the one above it, so a slow drag shows a cascade
-                int k = r - firstRow;
-                float local = Math.max(0f, Math.min(1f, (reveal - k * 0.07f) / 0.55f));
-                float ease = 1f - (1f - local) * (1f - local);
-                top += (1f - ease) * (28 + k * 10) * density;
-                rowAlpha = Math.round(255 * ease);
-                if (rowAlpha == 0) continue;
-            }
-            iconPaint.setAlpha(slots ? 150 * rowAlpha / 255 : rowAlpha);
-            textPaint.setAlpha(rowAlpha);
+            iconPaint.setAlpha(slots ? 150 : 255);
+            textPaint.setAlpha(255);
             for (int c = 0; c < cols; c++) {
                 int i = r * cols + c;
                 if (i >= n) break outer;
                 AppEntry e = items.get(i);
                 float cx = padX + (c + 0.5f) * cw;
+                int save = -1;
+                if (revealing) {
+                    // a soft wave from the thumb: icons nearest it come first, each fading in and
+                    // growing into place (no sliding), settling with a hint of bounce; closing runs
+                    // it backwards
+                    float ox = originX < 0 ? getWidth() / 2f : originX, oy = h + 40 * density;
+                    float iy = top + iconSize / 2f;
+                    float dist = (float) Math.hypot(cx - ox, iy - oy) / (float) Math.hypot(getWidth(), h + 40 * density);
+                    float local = Math.max(0f, Math.min(1f, (reveal - dist * 0.3f) / 0.7f));
+                    if (local <= 0f) continue;
+                    float ease = settle(local);
+                    rowAlpha = Math.round(255 * Math.min(1f, local * 1.5f));
+                    iconPaint.setAlpha(slots ? 150 * rowAlpha / 255 : rowAlpha);
+                    textPaint.setAlpha(rowAlpha);
+                    float sc = 0.8f + 0.2f * ease;
+                    save = canvas.save();
+                    canvas.scale(sc, sc, cx, iy);
+                }
                 if (slots) {
                     float half = iconSize / 2f + 3 * density;
                     slotPaint.setAlpha(Math.round(200 * slotAlpha));
@@ -275,6 +295,7 @@ final class AppGridView extends View {
                 if (labels && e.drawLabel != null) {
                     canvas.drawText(e.drawLabel, cx, top + iconSize + labelGap + textPaint.getTextSize(), textPaint);
                 }
+                if (save >= 0) canvas.restoreToCount(save);
             }
         }
         if (footer != null && !revealing) {
