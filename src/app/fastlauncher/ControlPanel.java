@@ -1026,14 +1026,18 @@ final class ControlPanel extends FrameLayout {
         if (button instanceof Round) ((Round) button).flip();
         else if (button instanceof Item) ((Item) button).flip();
         if (button != null) button.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
-        final java.util.function.BooleanSupplier now = "Wi-Fi".equals(label) ? this::wifiOn
-                : "Bluetooth".equals(label) ? this::btOn : null;
-        final boolean want = now != null && !now.getAsBoolean();
+        final java.util.function.BooleanSupplier now = stateOf(label);
+        // what you asked for is what the button shows now (the phone may still be mid-switch)
+        final boolean want = button instanceof Round ? ((Round) button).showing()
+                : button instanceof Item ? ((Item) button).showing() : now != null && !now.getAsBoolean();
+        wants.put(label, want);
+        checks.put(label, (checks.containsKey(label) ? checks.get(label) : 0) + 1);
+        if (now != null) setHold(button, SystemClock.uptimeMillis() + 15_000); // until the check below settles it
         host.pressTile(label, ok -> {
-            if (ok && now != null) checkSwitched(label, now, want, SystemClock.uptimeMillis());
-            // no surprise pop-ups: if the switch couldn't be reached, say so; the readback below
-            // then shows the real state (long-press still opens the full settings page)
-            if (!ok) say("Couldn't switch " + label + ". Try again");
+            if (now == null) setHold(button, SystemClock.uptimeMillis() + HOLD_MS);
+            // no error straight away: the result is checked, and pressed again if it didn't take
+            if (now != null) checkSwitched(label, button, now, want, SystemClock.uptimeMillis(), false);
+            else if (!ok) say(label + " didn't switch. Try again");
             // read the real state back as the system acts; a reading that still disagrees with the
             // tap is ignored until HOLD_MS, then the last one shows the truth (e.g. a failed switch)
             for (long t : new long[]{400, 900, 1600, HOLD_MS + 100}) main.postDelayed(this::refreshStates, t);
@@ -1044,18 +1048,81 @@ final class ControlPanel extends FrameLayout {
      * The phone's tile ignores a press while the radio is still settling (e.g. Bluetooth a moment
      * after it was turned on). Once it has settled the other way, press it once more.
      */
-    private void checkSwitched(String label, java.util.function.BooleanSupplier now, boolean want, long since) {
-        main.postDelayed(() -> {
-            if (now.getAsBoolean() == want) return;
-            if (settling(label)) { if (SystemClock.uptimeMillis() - since < 4000) checkSwitched(label, now, want, since); return; }
-            Diag.log("'" + label + "' didn't switch; pressing again");
-            host.pressTile(label, ok -> { for (long t : new long[]{400, 1200}) main.postDelayed(this::refreshStates, t); });
-        }, SystemClock.uptimeMillis() - since < 100 ? 1000 : 350); // give the first press time to take
+    /**
+     * Make sure a switch ends where it was asked to. The phone can read "off" for a moment while
+     * something is still turning on, and its tile ignores presses until it has settled, so the
+     * answer only counts once it has stayed the same for a while. Wrong then: press once more.
+     * Meanwhile the button keeps showing what was asked for.
+     */
+    private void checkSwitched(String label, View button, java.util.function.BooleanSupplier now, boolean want, long since, boolean retried) {
+        Integer g = checks.get(label);
+        int gen = g == null ? 1 : g + 1;
+        checks.put(label, gen);
+        watch(gen, label, button, now, want, since, retried, now.getAsBoolean(), SystemClock.uptimeMillis());
     }
 
-    /** Wi-Fi or Bluetooth is half-way through turning on or off. */
+    /** The newest check per control; an older one stops when it sees it's been replaced. */
+    private final java.util.Map<String, Integer> checks = new java.util.HashMap<>();
+
+    private void watch(final int gen, final String label, final View button, final java.util.function.BooleanSupplier now, final boolean want,
+                       final long since, final boolean retried, final boolean last, final long lastChange) {
+        main.postDelayed(() -> {
+            if (!Boolean.valueOf(want).equals(wants.get(label))) return; // a newer tap took over
+            if (!Integer.valueOf(gen).equals(checks.get(label))) return;  // or a newer check
+            boolean v = now.getAsBoolean();
+            long t = SystemClock.uptimeMillis(), changed = v != last ? t : lastChange;
+            boolean settled = t - changed >= 1500 && !settling(label);
+            if (!settled && t - since < 9000) {
+                watch(gen, label, button, now, want, since, retried, v, changed);
+                return;
+            }
+            if (v == want) { setHold(button, 0); refreshStates(); return; }
+            if (retried) { // pressed twice and still not there: now it's worth a word
+                say(label + " didn't switch. Try again");
+                setHold(button, 0);
+                refreshStates();
+                return;
+            }
+            Diag.log("'" + label + "' didn't switch; pressing again");
+            host.pressTile(label, ok -> checkSwitched(label, button, now, want, SystemClock.uptimeMillis(), true));
+        }, 300);
+    }
+
+    /** Until then, readings that contradict the button are ignored (0: show the truth now). */
+    private static void setHold(View b, long until) {
+        if (b instanceof Round) ((Round) b).holdUntil = until;
+        if (b instanceof Item) ((Item) b).holdUntil = until;
+    }
+
+    /** The last switch asked for, per control: an older check never undoes a newer tap. */
+    private final java.util.Map<String, Boolean> wants = new java.util.HashMap<>();
+
+    /** How to read back each control the phone's own tile switches. */
+    private java.util.function.BooleanSupplier stateOf(String label) {
+        final Context c = getContext();
+        switch (label) {
+            case "Wi-Fi": return this::wifiOn;
+            case "Bluetooth": return this::btOn;
+            case "Mobile data": return this::dataOn;
+            case "Hotspot": return () -> hotspotOn((WifiManager) c.getApplicationContext().getSystemService(Context.WIFI_SERVICE));
+            case "Location": return this::locationOn;
+            case "Aeroplane mode": return () -> Settings.Global.getInt(c.getContentResolver(), Settings.Global.AIRPLANE_MODE_ON, 0) == 1;
+            case "Power Saving": return this::saverOn;
+            case "Eye Comfort": return () -> Settings.System.getInt(c.getContentResolver(), "eyes_protection_mode", 0) == 1;
+            case "Dark mode": return () -> ((UiModeManager) c.getSystemService(Context.UI_MODE_SERVICE)).getNightMode() == UiModeManager.MODE_NIGHT_YES;
+            default: return null;
+        }
+    }
+
+    /** Wi-Fi, Bluetooth or the hotspot is half-way through turning on or off. */
     private boolean settling(String label) {
         try {
+            if ("Hotspot".equals(label)) {
+                WifiManager wm = (WifiManager) getContext().getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                int st = (Integer) WifiManager.class.getMethod("getWifiApState").invoke(wm);
+                return st == 10 || st == 12; // DISABLING, ENABLING
+            }
+            if (!"Wi-Fi".equals(label) && !"Bluetooth".equals(label)) return false;
             if ("Bluetooth".equals(label)) {
                 int st = btAdapter().getState();
                 return st == android.bluetooth.BluetoothAdapter.STATE_TURNING_ON || st == android.bluetooth.BluetoothAdapter.STATE_TURNING_OFF;
@@ -3261,7 +3328,10 @@ final class ControlPanel extends FrameLayout {
 
         long holdUntil;
 
+        boolean showing() { return shown != null && shown; }
+
         void flip() {
+            holdUntil = 0; // a new tap always flips it, whatever an earlier one was holding
             boolean on = shown == null || !shown;
             set(on, on ? "Turning on\u2026" : "Turning off\u2026");
             holdUntil = SystemClock.uptimeMillis() + HOLD_MS;
@@ -3326,7 +3396,10 @@ final class ControlPanel extends FrameLayout {
         /** Until this time a reading that contradicts the tap is the phone not having caught up. */
         long holdUntil;
 
+        boolean showing() { return shown != null && shown; }
+
         void flip() {
+            holdUntil = 0; // a new tap always flips it, whatever an earlier one was holding
             setActive(shown == null || !shown);
             holdUntil = SystemClock.uptimeMillis() + HOLD_MS;
         }

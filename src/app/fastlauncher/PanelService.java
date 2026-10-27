@@ -72,7 +72,10 @@ public class PanelService extends AccessibilityService implements ControlPanel.H
                 }
                 android.view.accessibility.AccessibilityNodeInfo tile = s.findTile(label);
                 if (tile != null) {
-                    boolean ok = tile.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK);
+                    boolean ok = tile.isEnabled() && tile.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK);
+                    // a tile half-way through switching (hotspot starting up) refuses presses for a
+                    // moment: wait for it rather than give up
+                    if (!ok && t < 5000) { s.main.postDelayed(this, 150); return; }
                     Diag.log("tile '" + label + "' clicked=" + ok + " after " + (android.os.SystemClock.uptimeMillis() - start) + "ms");
                     s.main.postDelayed(() -> s.closeSystemPanel(() -> done.accept(ok)), 180);
                     return;
