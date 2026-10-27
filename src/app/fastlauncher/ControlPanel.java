@@ -592,7 +592,7 @@ final class ControlPanel extends FrameLayout {
             return;
         }
         backdrop.setAlpha(0f);
-        backdrop.animate().alpha(1f).setDuration(140)
+        backdrop.animate().alpha(1f).setDuration(220).setInterpolator(Ui.STANDARD)
                 .withEndAction(() -> backdropBase.setVisibility(INVISIBLE)).start();
     }
 
@@ -2889,23 +2889,37 @@ final class ControlPanel extends FrameLayout {
     // ================================================================ motion
 
     /** How far a finger travels for the panel to open fully (and to close it again). */
+    /** How tall the sheet is (the whole screen): how far it slides. */
+    private float sheet() {
+        return getHeight() > 0 ? getHeight() : getResources().getDisplayMetrics().heightPixels;
+    }
+
+    /** How far the cards slide in from above. */
+    private float slide() {
+        return sheet() * 0.4f;
+    }
+
+    /** How far a finger pulls it fully open: the cards move with the finger, one to one. */
     private float cardTravel() {
-        return Ui.dp(getContext(), 340);
+        return slide();
     }
 
     void setProgress(float p) {
         progress = Math.max(0f, Math.min(1f, p));
-        // the card stays where it lands: it fades in, drifting down a little and settling to full
-        // size, like the system's own panel (sliding the whole card down showed its bottom first)
-        card.setAlpha(Math.min(1f, progress * 1.6f));
+        // like Apple's Control Center: the screen behind blurs and dims in place (no edge
+        // anywhere) while the cards slide down from the top with the finger. Both follow the
+        // same pull, so neither runs ahead of the other.
+        // the blur leads a little (eased out), so the screen behind never shows sharp through the cards
+        float blur = 1f - (1f - progress) * (1f - progress);
+        scrim.setAlpha(blur);
+        statusRow.setAlpha(blur);
+        card.setAlpha(Math.min(1f, progress * 1.4f));
         layCard();
-        scrim.setAlpha(progress);
-        statusRow.setAlpha(progress);
-        // Clear all rises from the bottom as the panel comes down
+        float d = Ui.dp(getContext(), 1);
         clearAll.setAlpha(progress * clearFade);
-        clearAll.setTranslationY((1f - progress) * Ui.dp(getContext(), 48));
+        clearAll.setTranslationY((1f - progress) * 32 * d);
         dots.setAlpha(progress);
-        dots.setTranslationY((1f - progress) * Ui.dp(getContext(), 24));
+        dots.setTranslationY((1f - progress) * 32 * d);
     }
 
     /** Pulled past where it stops: the card gives a little, stretching down (pixels). */
@@ -2913,14 +2927,12 @@ final class ControlPanel extends FrameLayout {
     private ValueAnimator stretchAnim;
 
     private void layCard() {
-        float d = Ui.dp(getContext(), 1);
-        float sc = 0.94f + 0.06f * progress;
         card.setPivotX(card.getWidth() / 2f);
         card.setPivotY(0f);
-        card.setScaleX(sc);
+        card.setScaleX(1f);
         // half the give moves it, half stretches it, so its bottom edge follows the finger
-        card.setScaleY(sc + (card.getHeight() > 0 ? stretch * 0.5f / card.getHeight() : 0f));
-        card.setTranslationY(-(1f - progress) * 56 * d + stretch * 0.5f);
+        card.setScaleY(1f + (card.getHeight() > 0 ? stretch * 0.5f / card.getHeight() : 0f));
+        card.setTranslationY(-(1f - progress) * slide() + stretch * 0.5f);
     }
 
     private void setStretch(float px) {
