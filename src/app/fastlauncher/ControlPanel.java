@@ -1868,15 +1868,23 @@ final class ControlPanel extends FrameLayout {
 
     // ================================================================ motion
 
+    /** How far a finger travels for the panel to open fully (and to close it again). */
     private float cardTravel() {
-        LayoutParams lp = (LayoutParams) card.getLayoutParams();
-        return Math.max(1, card.getHeight() + lp.topMargin + Ui.dp(getContext(), 16));
+        return Ui.dp(getContext(), 340);
     }
 
     void setProgress(float p) {
         progress = Math.max(0f, Math.min(1f, p));
-        float h = card.getHeight() > 0 ? cardTravel() : getResources().getDisplayMetrics().heightPixels;
-        card.setTranslationY(-(1f - progress) * h);
+        // the card stays where it lands: it fades in, drifting down a little and settling to full
+        // size, like the system's own panel (sliding the whole card down showed its bottom first)
+        float d = Ui.dp(getContext(), 1);
+        card.setTranslationY(-(1f - progress) * 56 * d);
+        card.setAlpha(Math.min(1f, progress * 1.6f));
+        float sc = 0.94f + 0.06f * progress;
+        card.setPivotX(card.getWidth() / 2f);
+        card.setPivotY(0f);
+        card.setScaleX(sc);
+        card.setScaleY(sc);
         scrim.setAlpha(progress);
         statusRow.setAlpha(progress);
         // Clear all rises from the bottom as the panel comes down
