@@ -108,6 +108,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
         Diag.install(this);
+        Migrate.importIfFresh(this);
         if (HomeGuard.ACTION_SET_HOME.equals(getIntent().getAction())) HomeGuard.request(this, 77);
         Ui.theme(this);
         builtDark = Ui.dark;
@@ -167,6 +168,11 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private final BroadcastReceiver debugReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
             String what = i.getStringExtra("debug");
+            if ("export".equals(what)) {
+                final Context app = getApplicationContext();
+                wallWorker.execute(() -> Migrate.export(app));
+                return;
+            }
             if ("report".equals(what)) {
                 final Context app = getApplicationContext();
                 wallWorker.execute(() -> {
