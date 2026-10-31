@@ -23,10 +23,11 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   Single-colour shortcut icons (Facebook's, for example) are tinted so they show on the dark card.
 - **Swipe down on home** opens the phone's own notification shade.
 - **Under the date**: the next alarm and calendar event when they fall within the coming day.
-- **Look**: menus, the wallpaper sheet and messages are solid cards over the blurred wallpaper. Everything follows light and dark mode.
+- **Look**: menus, the wallpaper sheet, the Wallpapers screen and messages are frosted glass over the blurred wallpaper (no plain grey). Everything follows light and dark mode.
 - **Type**: clock, date and headings use Montserrat (bundled, SIL Open Font License, see `assets/fonts/OFL.txt`).
 - **Long-press home**: wallpaper panel, the launcher's only settings: your wallpaper large with New one
-  and Browse on it, a row of fresh picks to preview and set (kept until you tap Refresh), themes and auto-change.
+  and Browse on it, a row of fresh picks to preview and set (kept until you tap Refresh) and auto-change.
+  Themes are the filters inside Browse.
   The lock screen and the notification and quick-settings panels are the phone's own; the launcher does not touch them.
 - **Colours** follow the wallpaper: the accent is a soft tone of its most colourful colour (grey keeps blue).
   - Wallpapers come from [wallhaven.cc](https://wallhaven.cc) (SFW, portrait, at least 1080x1920).

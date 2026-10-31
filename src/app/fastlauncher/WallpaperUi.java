@@ -243,43 +243,6 @@ final class WallpaperUi {
             for (int i = 0; i < PICKS; i++) picks.addView(pickTile(c, null), pickLp(c, i));
             Thumbs.disk = new java.io.File(c.getCacheDir(), "thumbs");
 
-            // --- themes: one row that scrolls sideways
-            LinearLayout themeHead = new LinearLayout(c);
-            themeHead.setGravity(Gravity.CENTER_VERTICAL);
-            card.addView(themeHead, Ui.lp(-1, -2, Ui.dpi(c, 18)));
-            themeHead.addView(Ui.label(c, "Themes"), new LinearLayout.LayoutParams(0, -2, 1f));
-            themeHead.addView(Ui.text(c, "New ones come from these", 11.5f, Ui.FG3, false));
-            HorizontalScrollView themeScroll = new HorizontalScrollView(c);
-            themeScroll.setHorizontalScrollBarEnabled(false);
-            themeScroll.setOverScrollMode(OVER_SCROLL_IF_CONTENT_SCROLLS); // stretches at the ends
-            themeScroll.setClipToPadding(false);
-            themeScroll.setPadding(edge, 0, edge, 0);
-            LinearLayout chips = new LinearLayout(c);
-            themeScroll.addView(chips);
-            LinearLayout.LayoutParams tsp = Ui.lp(-1, -2, Ui.dpi(c, 8));
-            tsp.leftMargin = tsp.rightMargin = -edge;
-            card.addView(themeScroll, tsp);
-            final Set<String> chosen = Walls.themes(c);
-            for (final Walls.Theme t : Walls.THEMES) {
-                final Ui.Chip chip = new Ui.Chip(c, t.label);
-                chip.setOn(chosen.contains(t.key));
-                chip.setOnClickListener(v -> {
-                    if (chip.isOn() && chosen.size() == 1) {
-                        chip.animate().translationX(Ui.dp(getContext(), 6)).setDuration(60)
-                                .withEndAction(() -> chip.animate().translationX(0).setDuration(120).start()).start();
-                        host.snack("Keep at least one theme");
-                        return;
-                    }
-                    chip.setOn(!chip.isOn());
-                    if (chip.isOn()) chosen.add(t.key); else chosen.remove(t.key);
-                    Walls.setThemes(getContext(), chosen);
-                    chip.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
-                });
-                LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-2, -2);
-                if (chips.getChildCount() > 0) cp.leftMargin = Ui.dpi(c, 8);
-                chips.addView(chip, cp);
-            }
-
             // --- change automatically
             LinearLayout autoHead = new LinearLayout(c);
             autoHead.setGravity(Gravity.CENTER_VERTICAL);
@@ -600,19 +563,21 @@ final class WallpaperUi {
         Browser(Host h) {
             super(h);
             Context c = getContext();
-            setBackgroundColor(Ui.BG);
+            setBackground(Ui.frost(this, 0)); // the blurred wallpaper, like the sheet and the menus
             thumbs = new Thumbs(() -> { if (grid != null) grid.invalidate(); });
 
             LinearLayout top = new LinearLayout(c);
             top.setOrientation(LinearLayout.VERTICAL);
             top.setPadding(0, h.insetTop() + Ui.dpi(c, 6), 0, Ui.dpi(c, 10));
-            top.setBackgroundColor((Ui.BG & 0x00FFFFFF) | 0xF2000000);
+            top.setBackground(Ui.frost(top, 0)); // lines up with the screen behind, so it reads as one surface
 
             LinearLayout bar = new LinearLayout(c);
             bar.setGravity(Gravity.CENTER_VERTICAL);
             bar.setPadding(Ui.dpi(c, 8), 0, Ui.dpi(c, 16), 0);
             top.addView(bar, Ui.lp(-1, Ui.dpi(c, 52)));
             Ui.Glyph back = new Ui.Glyph(c, Ui.G_BACK, Ui.FG);
+            back.setBackground(Ui.round(Ui.FILL, Ui.dp(c, 22)));
+            back.setPadding(Ui.dpi(c, 11), Ui.dpi(c, 11), Ui.dpi(c, 11), Ui.dpi(c, 11));
             back.setClickable(true);
             back.setOnClickListener(v -> close());
             Ui.pressable(back);

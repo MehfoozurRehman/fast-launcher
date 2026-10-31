@@ -1373,8 +1373,8 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             card.setOrientation(LinearLayout.VERTICAL);
             int cp = Ui.dpi(c, 6);
             card.setPadding(cp, cp, cp, cp);
-            // a solid card: frosted, it vanished into the blurred drawer behind it
-            card.setBackground(Ui.glass(Ui.dark ? 0xFF262626 : 0xFFFFFFFF, Ui.dp(c, 24)));
+            // frosted like the sheet, with a firmer tint so it still stands out from the drawer behind it
+            card.setBackground(Ui.frost(card, Ui.dp(c, 24), Ui.dark ? 0x99000000 : 0xC8F5F6F8));
             card.setClipToOutline(true);
 
             // a titled list (hidden apps) says what it is; an app's menu doesn't need to, the

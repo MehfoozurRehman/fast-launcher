@@ -309,7 +309,11 @@ final class Ui {
      * saturated (colour glows through), under a flat tint. Plain: no gradients, no outline.
      */
     static android.graphics.drawable.Drawable frost(final View owner, final float radius) {
-        final int tint = dark ? 0x52000000 : 0xA3F5F6F8;
+        return frost(owner, radius, dark ? 0x52000000 : 0xA3F5F6F8);
+    }
+
+    /** The same glass with a chosen tint (a firmer one for a card that sits over busy content). */
+    static android.graphics.drawable.Drawable frost(final View owner, final float radius, final int tint) {
         return new android.graphics.drawable.Drawable() {
             private final Paint bmp = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
             private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -493,8 +497,10 @@ final class Ui {
                     }
                     break;
                 }
-                case G_BACK:
-                    path.moveTo(14.5f, 5); path.lineTo(7.5f, 12); path.lineTo(14.5f, 19);
+                case G_BACK: // an arrow: a short shaft and an open head, rounded
+                    p.setStrokeWidth(2.1f);
+                    path.moveTo(19.5f, 12); path.lineTo(5, 12);
+                    path.moveTo(11.5f, 5.5f); path.lineTo(5, 12); path.lineTo(11.5f, 18.5f);
                     c.drawPath(path, p);
                     break;
                 case G_CHECK:
