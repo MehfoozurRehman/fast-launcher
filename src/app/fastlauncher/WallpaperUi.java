@@ -913,14 +913,12 @@ final class WallpaperUi {
             TextView clock = MainActivity.makeClock(c);
             TextView date = MainActivity.makeDate(c);
             java.util.Calendar cal = java.util.Calendar.getInstance();
-            clock.setText(MainActivity.stackedTime(cal));
+            clock.setText(MainActivity.clockText(cal));
             date.setText(MainActivity.dateText(cal));
-            FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
-            cp.leftMargin = Ui.dpi(c, MainActivity.SIDE_DP);
+            FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
             cp.topMargin = Ui.dpi(c, MainActivity.CLOCK_TOP_DP);
             mock.addView(clock, cp);
-            FrameLayout.LayoutParams dp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
-            dp.leftMargin = Ui.dpi(c, MainActivity.SIDE_DP);
+            FrameLayout.LayoutParams dp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
             dp.topMargin = Ui.dpi(c, MainActivity.DATE_TOP_DP);
             mock.addView(date, dp);
             AppGridView dock = MainActivity.makeDock(c);
