@@ -11,10 +11,6 @@ import java.util.Calendar;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/**
- * The line under the date: the next alarm and the next calendar event, each only when it falls
- * within the coming day. Read off the main thread; calendar is skipped without its permission.
- */
 final class Agenda {
     private Agenda() {}
 
@@ -46,7 +42,6 @@ final class Agenda {
         });
     }
 
-    /** The first timed event that hasn't ended and starts within a day: "10:30 Standup" or "Now: Standup". */
     private static String nextEvent(Context c, long now) {
         if (c.checkSelfPermission(Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) return null;
         String[] cols = {CalendarContract.Instances.TITLE, CalendarContract.Instances.BEGIN, CalendarContract.Instances.END,
@@ -71,7 +66,7 @@ final class Agenda {
     private static String time(long ms) {
         Calendar c = Calendar.getInstance();
         c.setTimeInMillis(ms);
-        // the home clock has no am/pm, but an alarm or event time needs one ("7:00" which?)
+
         String t = MainActivity.clockText(c) + (c.get(Calendar.AM_PM) == Calendar.AM ? " am" : " pm");
         Calendar today = Calendar.getInstance();
         if (c.get(Calendar.DAY_OF_YEAR) != today.get(Calendar.DAY_OF_YEAR)) t = "tomorrow " + t;

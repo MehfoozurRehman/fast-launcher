@@ -5,7 +5,7 @@ from PIL import Image, ImageDraw, ImageFilter
 import importlib.util
 spec = importlib.util.spec_from_file_location("mk", os.path.join(os.path.dirname(__file__), "make_icon.py"))
 
-S = 8  # pixels per viewport unit
+S = 8
 W = 108 * S
 
 def lerp(a, b, t): return tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
@@ -40,7 +40,6 @@ def icon():
     ImageDraw.Draw(sh).polygon(pebble_pts(54, 56.5, 25.5), fill=72)
     bg.paste((0, 0, 0), mask=sh.filter(ImageFilter.GaussianBlur(S * 1.5)))
     ImageDraw.Draw(bg).polygon(pebble_pts(54, 53, 25), fill=(255, 255, 255))
-    # chevrons with a blue->violet gradient
     def chevron(pts, alpha):
         m = Image.new("L", (W, W), 0)
         d = ImageDraw.Draw(m)

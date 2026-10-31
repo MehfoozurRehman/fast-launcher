@@ -24,34 +24,21 @@ import java.io.FileOutputStream;
 import java.security.MessageDigest;
 import java.util.Set;
 
-/**
- * Renders every app icon as a pebble: the app's own artwork, cut to an organic blob shape. No
- * plate, rim or shadow around it: the icon itself is the shape. Each app gets its own gentle
- * variation of the shape, seeded from its name, so the grid feels hand-made but stays calm.
- * It is baked into the bitmap, so drawing an icon is a single drawBitmap.
- */
 final class Icons {
-
-    /** Bump when the look changes so cached PNGs are re-rendered. */
     private static final int VERSION = 13;
-    private static final float LOGO = 0.80f; // the logo on top of an icon's background, so it has room around it
-    private static final float SHAPE = 0.82f; // the blob's size relative to the icon cell
+    private static final float LOGO = 0.80f;
+    private static final float SHAPE = 0.82f;
 
     private Icons() {}
 
-    /** Shadow + rim padding around the shape, in px. */
     static int pad(Context c) { return Math.round(4 * c.getResources().getDisplayMetrics().density); }
 
-    /**
-     * A smooth closed blob: a circle whose radius is nudged by a few low-frequency sine
-     * lobes. Normalised so its widest point touches radius r.
-     */
     static Path blob(float cx, float cy, float r, long seed, float turn) {
         java.util.Random rnd = new java.util.Random(seed);
         double p2 = rnd.nextDouble() * Math.PI * 2, p3 = rnd.nextDouble() * Math.PI * 2, p5 = rnd.nextDouble() * Math.PI * 2;
-        double a2 = 0.026 + rnd.nextDouble() * 0.020; // oval-ness
-        double a3 = 0.028 + rnd.nextDouble() * 0.020; // three soft lobes: the pebble look
-        double a5 = 0.008 + rnd.nextDouble() * 0.010; // a little wobble
+        double a2 = 0.026 + rnd.nextDouble() * 0.020;
+        double a3 = 0.028 + rnd.nextDouble() * 0.020;
+        double a5 = 0.008 + rnd.nextDouble() * 0.010;
         int n = 180;
         float[] xs = new float[n], ys = new float[n];
         double max = 0;
@@ -67,7 +54,7 @@ final class Icons {
             xs[i] = cx + rr * (float) Math.cos(t);
             ys[i] = cy + rr * (float) Math.sin(t);
         }
-        // quadratic smoothing through midpoints: no visible facets at any size
+
         Path p = new Path();
         p.moveTo((xs[n - 1] + xs[0]) / 2f, (ys[n - 1] + ys[0]) / 2f);
         for (int i = 0; i < n; i++) {
@@ -78,8 +65,6 @@ final class Icons {
         return p;
     }
 
-    /** Disk-cached icon. Returns a GPU (HARDWARE) bitmap when possible. */
-    /** dark: no longer changes the icon (there is no plate), kept so callers stay as they are. */
     static Bitmap load(Context c, PackageManager pm, ActivityInfo ai, int size, Set<String> used, boolean dark) {
         File f = cacheFile(c, ai, size, dark);
         if (used != null) markUsed(c, ai, size, used);
@@ -93,7 +78,6 @@ final class Icons {
         return toHardware(b);
     }
 
-    /** Records that an in-memory icon's cache file is still wanted, without decoding it. */
     static void markUsed(Context c, ActivityInfo ai, int size, Set<String> used) {
         used.add(cacheFile(c, ai, size, false).getName());
     }
@@ -117,8 +101,6 @@ final class Icons {
         return new File(dir(c), md5(key) + ".px");
     }
 
-    // Raw ARGB pixels with a tiny header: no PNG decode, so a cold start reads ~130 icons in
-    // tens of milliseconds instead of half a second.
     private static void writeRaw(File f, Bitmap b) {
         java.nio.ByteBuffer buf = java.nio.ByteBuffer.allocate(b.getByteCount());
         b.copyPixelsToBuffer(buf);
@@ -171,11 +153,6 @@ final class Icons {
         return hw;
     }
 
-    /**
-     * The app's own icon, skipping the OEM icon theme. Honor swaps launcher icons inside
-     * Resources.getDrawable, so adaptive icons are inflated from their XML directly and
-     * bitmap icons are decoded from the raw PNG bytes.
-     */
     private static Drawable raw(PackageManager pm, ActivityInfo ai) {
         int id = ai.getIconResource();
         if (id == 0) return null;
@@ -186,7 +163,6 @@ final class Icons {
             Drawable d = Drawable.createFromXml(r, p);
             if (d != null) return d;
         } catch (Throwable ignored) {
-            // not an XML drawable: a plain bitmap icon
         }
         try (java.io.InputStream in = r.openRawResource(id)) {
             Bitmap b = BitmapFactory.decodeStream(in);
@@ -206,7 +182,6 @@ final class Icons {
         float cx = full / 2f, cy = full / 2f, r = size / 2f * SHAPE - density * 0.5f;
         long seed = (ai.packageName + "/" + ai.name).hashCode();
 
-        // the artwork at the full size of the shape, then cut to the blob: nothing around it
         int inner = Math.round(r * 2);
         Bitmap content;
         try { content = content(d, inner); } catch (Throwable t) { return null; }
@@ -229,18 +204,16 @@ final class Icons {
         Canvas c = new Canvas(b);
         if (d instanceof AdaptiveIconDrawable) {
             AdaptiveIconDrawable a = (AdaptiveIconDrawable) d;
-            // layers are 108dp with the visible 72dp in the middle
+
             int ext = Math.round(s * 0.25f);
             Rect r = new Rect(-ext, -ext, s + ext, s + ext);
             Drawable bg = a.getBackground(), fg = a.getForeground();
             if (bg != null) { bg.setBounds(r); bg.draw(c); } else c.drawColor(Color.WHITE);
             if (fg != null) {
-                // the background is the container (it fills the shape); the logo sits inside it with space around
                 fg.setBounds(r);
                 c.save();
                 c.scale(LOGO, LOGO, s / 2f, s / 2f);
-                // a logo that bleeds off its layer on purpose (Facebook's "f" runs off the bottom) is
-                // trimmed by a circle, so it ends inside the shape with a margin instead of at its edge
+
                 Path keep = new Path();
                 keep.addCircle(s / 2f, s / 2f, s * 0.5f, Path.Direction.CW);
                 c.clipPath(keep);
@@ -249,12 +222,11 @@ final class Icons {
             }
             return b;
         }
-        // Legacy icon: if it already fills its square, let it bleed to the edge.
+
         d.setBounds(0, 0, s, s);
         d.draw(c);
         if (fullBleed(b)) return b;
-        // A pre-shaped icon (its own rounded square or circle): extend its background
-        // colour into our corners so it reads as one shape, not a tile inside a tile.
+
         if (shaped(b)) {
             int bg = b.getPixel(s / 2, Math.round(s * 0.07f)) | 0xFF000000;
             b.eraseColor(bg);
@@ -263,7 +235,7 @@ final class Icons {
             d.draw(c);
             return b;
         }
-        // Otherwise sit it on a soft paper tile.
+
         b.eraseColor(Color.TRANSPARENT);
         Paint tile = new Paint();
         tile.setShader(new LinearGradient(0, 0, 0, s, 0xFFFFFFFF, 0xFFECEEF2, Shader.TileMode.CLAMP));

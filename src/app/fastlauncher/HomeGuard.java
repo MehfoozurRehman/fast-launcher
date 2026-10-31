@@ -8,12 +8,6 @@ import android.app.role.RoleManager;
 import android.content.Context;
 import android.content.Intent;
 
-/**
- * If Fast Launcher stops being the phone's home app (a crash, a system "restore default launcher",
- * a settings reset) there is no app icon to tap and nothing on screen to bring it back. The
- * notification listener (which feeds the icon badges) is still alive, so it leaves one quiet notification: tap it, say yes to the system's
- * "make this your home app?" question, and the launcher is back. It goes away by itself once it is.
- */
 final class HomeGuard {
     private HomeGuard() {}
 
@@ -26,10 +20,9 @@ final class HomeGuard {
             RoleManager rm = (RoleManager) c.getSystemService(Context.ROLE_SERVICE);
             if (rm != null) return rm.isRoleHeld(RoleManager.ROLE_HOME);
         } catch (Throwable ignored) {}
-        return true; // can't tell: don't nag
+        return true;
     }
 
-    /** Post the notification when we're not home; take it down when we are. Safe to call often. */
     static void check(Context c) {
         try {
             NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
@@ -52,7 +45,6 @@ final class HomeGuard {
         }
     }
 
-    /** Ask the system to make us home again (one yes in its own dialog). */
     static void request(android.app.Activity a, int code) {
         try {
             RoleManager rm = (RoleManager) a.getSystemService(Context.ROLE_SERVICE);

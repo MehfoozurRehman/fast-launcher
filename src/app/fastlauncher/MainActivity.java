@@ -54,8 +54,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity implements WallpaperUi.Host {
-
-    // Layout shared with the wallpaper preview so it can show "your home" exactly.
     static final int CLOCK_TOP_DP = 100, DATE_TOP_DP = 204, DOCK_HEIGHT_DP = 190;
     private static final int DOCK_SLOTS = 10;
     private static final String[][] DEFAULT_DOCK = {
@@ -85,9 +83,8 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private Ui.Glyph btnSearch;
     private AppGridView dock, grid;
 
-    /** Survives activity recreation (theme/wallpaper changes), so icons never blink. */
     private static final List<AppGridView.AppEntry> CACHE = new ArrayList<>();
-    /** Which look (dark/light plates) and size the icons in CACHE were drawn with. */
+
     private static boolean cacheDark = Ui.dark;
     private static int cacheSize;
     private final List<AppGridView.AppEntry> all = new ArrayList<>();
@@ -95,8 +92,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private List<AppGridView.AppEntry> shown = drawerApps;
     private final AppGridView.AppEntry[] dockEntries = new AppGridView.AppEntry[DOCK_SLOTS];
     private List<AppGridView.AppEntry> dockShown = new ArrayList<>();
-    // Process-wide and never shut down: a late callback from an old activity instance
-    // must never hit a dead executor.
+
     private static final ExecutorService iconWorker = Executors.newSingleThreadExecutor();
     private static final ExecutorService wallWorker = Executors.newSingleThreadExecutor();
     private Object colorsListener;
@@ -108,8 +104,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private int loadGen;
     private AppGridView.AppEntry placing;
     private final List<WallpaperUi.Overlay> overlays = new ArrayList<>();
-
-    // ================================================================ lifecycle
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -159,7 +153,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             dock.setItems(dockShown);
         }
         IntentFilter dbg = new IntentFilter("app.fastlauncher.DEBUG");
-        // only adb (which holds DUMP) may send these; other apps can't touch the wallpaper
+
         if (Build.VERSION.SDK_INT >= 33)
             registerReceiver(debugReceiver, dbg, android.Manifest.permission.DUMP, null, Context.RECEIVER_EXPORTED);
         else registerReceiver(debugReceiver, dbg, android.Manifest.permission.DUMP, null);
@@ -170,13 +164,10 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         loadApps(null);
     }
 
-    /** adb shell am broadcast -a app.fastlauncher.DEBUG -p app.fastlauncher --es debug swap|restore|history|apply:ID */
     private final BroadcastReceiver debugReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
             String what = i.getStringExtra("debug");
             if ("report".equals(what)) {
-                // the same report as "Report a problem", as a file adb can pull:
-                // /sdcard/Android/data/app.fastlauncher/files/report.txt
                 final Context app = getApplicationContext();
                 wallWorker.execute(() -> {
                     try (java.io.FileWriter w = new java.io.FileWriter(new java.io.File(app.getExternalFilesDir(null), "report.txt"))) {
@@ -185,18 +176,18 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 });
                 return;
             }
-            if (what != null && what.startsWith("seed:")) { // adb: preview an accent from any colour
+            if (what != null && what.startsWith("seed:")) {
                 seedPreview = true;
                 if (Ui.setSeed(MainActivity.this, Ui.seedFrom(new int[]{(int) Long.parseLong(what.substring(5), 16) | 0xFF000000}))) recreate();
                 return;
             }
-            if ("seedreset".equals(what)) { // back to the wallpaper's own colour
+            if ("seedreset".equals(what)) {
                 seedPreview = false;
                 try { onWallColors(WallpaperManager.getInstance(MainActivity.this).getWallpaperColors(WallpaperManager.FLAG_SYSTEM)); }
                 catch (Exception ignored) {}
                 return;
             }
-            if ("gc".equals(what)) { // leak checks: count only what's really still referenced
+            if ("gc".equals(what)) {
                 for (int k = 0; k < 3; k++) { Runtime.getRuntime().gc(); System.runFinalization(); }
                 return;
             }
@@ -206,10 +197,9 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
     @Override public void onConfigurationChanged(android.content.res.Configuration c) {
         super.onConfigurationChanged(c);
-        // light/dark switched: rebuild with the new palette (icons come from the cache instantly)
-        // (compare with what this activity was built in: the shared palette may have flipped first)
+
         Ui.theme(this);
-        // font size, display size or language changed too: everything is sized in onCreate
+
         android.content.res.Configuration was = builtConfig;
         if (builtDark != Ui.dark || was == null || was.fontScale != c.fontScale || was.densityDpi != c.densityDpi
                 || !was.getLocales().equals(c.getLocales())) recreate();
@@ -218,7 +208,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private android.content.res.Configuration builtConfig;
 
     private boolean builtDark;
-    private static boolean seedPreview; // adb colour preview in force: the wallpaper doesn't override it
+    private static boolean seedPreview;
     private int builtAccent;
 
     @Override protected void onDestroy() {
@@ -230,7 +220,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                         (WallpaperManager.OnColorsChangedListener) colorsListener);
             } catch (Exception ignored) {}
         }
-        loadGen++; // abandon any in-flight icon load for this instance
+        loadGen++;
         super.onDestroy();
     }
 
@@ -245,7 +235,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         super.onNewIntent(i);
         if (HomeGuard.ACTION_SET_HOME.equals(i.getAction())) { HomeGuard.request(this, 77); return; }
         if (!Intent.ACTION_MAIN.equals(i.getAction())) return;
-        // Home pressed: unwind everything back to the plain home screen.
+
         closeAllOverlays();
         cancelPlacing();
         if (searching) endSearch();
@@ -259,7 +249,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         if (root.progress > 0f) root.animateTo(0f);
     }
 
-    /** adb: am start -n app.fastlauncher/.MainActivity --es debug swap|restore */
     private void debugWallpaper(String what) {
         final Context app = getApplicationContext();
         wallWorker.execute(() -> {
@@ -284,18 +273,13 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         });
     }
 
-    /**
-     * Coming back from an app: the home screen must be showing and drawn. A transition cut off
-     * while we were in the background (an app opened mid-animation, or killed mid-way) could leave
-     * home faded, scaled or stuck on a stale GPU layer, showing only the wallpaper until a touch.
-     */
     private void settleHome() {
         if (root == null) return;
-        // already on its way somewhere (Home's close runs just before this): let it finish
+
         if (root.animating()) return;
         float p = root.progress;
-        if (p > 0f && p < 1f) root.snapTo(p >= 0.5f ? 1f : 0f);   // never left half way
-        else root.snapTo(p);                                       // re-applies looks, drops layers
+        if (p > 0f && p < 1f) root.snapTo(p >= 0.5f ? 1f : 0f);
+        else root.snapTo(p);
         if (root.progress == 0f) {
             home.setVisibility(View.VISIBLE);
             home.setAlpha(1f);
@@ -324,13 +308,13 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
     @Override protected void onResume() {
         super.onResume();
-        // a light/dark switch that happened while we were in the background
+
         Ui.theme(this);
         if (builtDark != Ui.dark || builtAccent != Ui.ACCENT) { recreate(); return; }
         settleHome();
         NotifService.listener = notifChanged;
-        HomeGuard.check(this); // not the home app any more? leave a note that switches back
-        // notification access granted but not connected (Honor may drop listeners): ask again
+        HomeGuard.check(this);
+
         if (NotifService.running == null) {
             String l = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
             if (l != null && l.contains(getPackageName())) {
@@ -345,7 +329,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         tick.run();
         if (sheet == null) main.postDelayed(() -> { if (!isDestroyed()) sheet(); }, 1500);
         Walls.cover = cover;
-        // Backstop for the scheduled job, which OEM battery managers like to delay.
+
         if (Walls.due(this) && !Walls.isBusy()) {
             final Context app = getApplicationContext();
             wallWorker.execute(() -> { try { if (Walls.due(app)) Walls.next(app, false); } catch (Exception ignored) {} });
@@ -358,8 +342,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         clock.removeCallbacks(tick);
         super.onPause();
     }
-
-    // ================================================================ shared view factories
 
     static TextView makeClock(Context c) {
         TextView t = new TextView(c);
@@ -385,7 +367,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         return t;
     }
 
-    /** Text inside a pill under the date (weather, agenda): plain and readable. */
     static TextView makeChipText(Context c, float sp, int weight) {
         TextView t = new TextView(c);
         t.setTextColor(Color.WHITE);
@@ -408,8 +389,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         return new SimpleDateFormat("EEEE  ·  d MMMM", Locale.getDefault()).format(c.getTime()).toUpperCase(Locale.getDefault());
     }
 
-    // ================================================================ home
-
     private int dpi(float v) { return Math.round(v * dp); }
 
     private void buildHome() {
@@ -420,7 +399,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         home = new FrameLayout(this);
         root.addView(home, new FrameLayout.LayoutParams(-1, -1));
 
-        // Only visible on bright wallpapers, to keep the white clock legible.
         topScrim = new View(this);
         topScrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{0x99000000, 0x66000000, 0x00000000}));
@@ -450,7 +428,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         weatherChip.setPadding(dpi(14), dpi(4), dpi(4), dpi(4));
         weatherGlyph = new Weather.Glyph(this);
         weatherChip.addView(weatherGlyph, new LinearLayout.LayoutParams(dpi(22), dpi(22)));
-        weatherText = makeDate(this); // same small tracked style as the date: one line
+        weatherText = makeDate(this);
         LinearLayout.LayoutParams wt = new LinearLayout.LayoutParams(-2, -2);
         wt.leftMargin = dpi(5);
         weatherChip.addView(weatherText, wt);
@@ -515,26 +493,22 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private View dimView;
 
     private void buildDrawer() {
-        // first the wallpaper (and home on it) darkens in place, still sharp...
         dimView = new View(this);
         dimView.setBackgroundColor(Color.BLACK);
         dimView.setAlpha(0f);
         dimView.setVisibility(View.INVISIBLE);
         root.addView(dimView, new FrameLayout.LayoutParams(-1, -1));
-        // ...then the drawer's own deep, wallpaper-tinted background comes in under the apps
+
         blurView = new BlurView(this);
         blurView.setVisibility(View.INVISIBLE);
         root.addView(blurView, new FrameLayout.LayoutParams(-1, -1));
 
-        // Fading a ViewGroup normally renders it offscreen every frame; ours has no
-        // overlapping children, so let each child take the alpha directly.
         drawer = new FrameLayout(this) {
             @Override public boolean hasOverlappingRendering() { return false; }
         };
-        blurView.setForeground(new android.graphics.drawable.ColorDrawable(0x33000000)); // a light extra dim: the blur already darkens itself for legible text
+        blurView.setForeground(new android.graphics.drawable.ColorDrawable(0x33000000));
         drawer.setVisibility(View.INVISIBLE);
         root.addView(drawer, new FrameLayout.LayoutParams(-1, -1));
-
 
         grid = new AppGridView(this, 5, 17, 97, 48, 12, 12, true, true);
         grid.setListener(new AppGridView.Listener() {
@@ -593,8 +567,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         grid.setBottomInset(insetBottom);
     }
 
-    // ================================================================ wallpaper colours
-
     private void watchWallpaperColors() {
         if (Build.VERSION.SDK_INT < 27) return;
         WallpaperManager wm = WallpaperManager.getInstance(this);
@@ -617,14 +589,13 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             bright = Color.luminance(wallColor) > 0.55f;
         }
         brightWall = bright;
-        topLuma = -1f; // until the new blur has been analysed
-        // the launcher's accent follows the wallpaper: rebuild with it when it changes
+        topLuma = -1f;
+
         int seed = Ui.seedFrom(new int[]{wc.getPrimaryColor().toArgb(),
                 wc.getSecondaryColor() == null ? 0 : wc.getSecondaryColor().toArgb(),
                 wc.getTertiaryColor() == null ? 0 : wc.getTertiaryColor().toArgb()});
         if (!seedPreview && Ui.setSeed(this, seed)) { main.post(this::recreate); return; }
         if (coverPending) {
-            // the system has the new wallpaper; give it a beat to draw, then drop our copy
             main.removeCallbacks(fadeCover);
             main.postDelayed(fadeCover, 450);
         }
@@ -633,8 +604,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         updateBars();
         loadBlur();
     }
-
-    // ================================================================ wallpaper cover
 
     private final Runnable fadeCover = () -> {
         coverPending = false;
@@ -653,7 +622,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 coverView.setBitmap(next);
                 coverView.setVisibility(View.VISIBLE);
                 coverView.setAlpha(0f);
-                // a soft cross-fade from the old wallpaper to the new one
+
                 coverView.animate().alpha(1f).setDuration(260).setInterpolator(Ui.STANDARD).withEndAction(ready).start();
             });
         }
@@ -662,12 +631,10 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             main.post(() -> {
                 coverPending = true;
                 main.removeCallbacks(fadeCover);
-                main.postDelayed(fadeCover, 1800); // fallback if no colour callback arrives
+                main.postDelayed(fadeCover, 1800);
             });
         }
     };
-
-    // ================================================================ weather
 
     private static final int REQ_LOCATION = 7;
 
@@ -698,7 +665,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             try {
                 if (loc != null) Weather.fetch(app, loc.getLatitude(), loc.getLongitude());
             } catch (Exception ignored) {
-                // offline or rate-limited: keep showing the cached reading
             }
             main.post(() -> {
                 weatherLoading = false;
@@ -740,8 +706,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         }
     }
 
-    /** With a blur behind it the drawer needs only a light tint; without, a stronger scrim. */
-    /** Shade behind the clock in proportion to how bright the top of the wallpaper is. */
     private void updateTopScrim() {
         float a;
         if (topLuma >= 0f) a = Math.max(0f, Math.min(1f, (topLuma - 0.08f) / 0.25f));
@@ -752,7 +716,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private void updateDrawerScrim() {
         boolean blur = blurView.hasBlur();
         if (blur) {
-            // the blur is already darkened band by band for legible white text
             drawer.setBackground(null);
             blurView.setDim(1f);
         } else {
@@ -767,7 +730,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             main.post(() -> {
                 if (isDestroyed()) return;
                 blurView.setBitmap(b == null ? null : b.bitmap);
-                Ui.frostSource = b == null ? null : b.bitmap; // frosted glass for menus and sheets
+                Ui.frostSource = b == null ? null : b.bitmap;
                 topLuma = b == null ? -1f : b.topLuma;
                 updateDrawerScrim();
                 updateTopScrim();
@@ -775,7 +738,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         });
     }
 
-    /** Dark status icons only on a bright wallpaper with nothing dark on top of it. */
     private void updateBars() {
         boolean darkIcons = brightWall && overlays.isEmpty() && root.progress < 0.5f;
         int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
@@ -784,8 +746,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         View d = getWindow().getDecorView();
         if (d.getSystemUiVisibility() != flags) d.setSystemUiVisibility(flags);
     }
-
-    // ================================================================ apps
 
     private void loadApps(final String changedPkg) {
         final int gen = ++loadGen;
@@ -805,7 +765,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 list.add(e);
             }
             Collections.sort(list, (a, b) -> a.lower.compareTo(b.lower));
-            // keep icons already in memory, except for the package that just changed
+
             for (AppGridView.AppEntry e : list) {
                 if (e.cn.getPackageName().equals(changedPkg)) continue;
                 for (AppGridView.AppEntry old : previous)
@@ -821,18 +781,16 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 refreshDrawerList();
                 dock.setItems(dockShown);
             });
-            // dock first so the home screen fills in before the drawer
+
             List<AppGridView.AppEntry> order = new ArrayList<>(list);
             Collections.sort(order, (a, b) -> Boolean.compare(!inDefaultDock(b), !inDefaultDock(a)));
             Set<String> used = new HashSet<>();
             int n = 0;
-            // light/dark switched: swap each icon for the other look as it's ready (the old one
-            // stays on screen meanwhile, so nothing blinks)
-            // (display size changed: same thing, the icons are redrawn at the new size)
+
             final boolean dark = Ui.dark;
             final boolean restyle = cacheDark != dark || cacheSize != iconPx;
             for (AppGridView.AppEntry e : order) {
-                if (gen != loadGen) return; // aborted: the next pass still sees the old style and redoes it
+                if (gen != loadGen) return;
                 if (e.icon == null || restyle) e.icon = Icons.load(this, pm, e.ai, iconPx, used, dark);
                 else Icons.markUsed(this, e.ai, iconPx, used);
                 if (++n % 8 == 0) { grid.postInvalidate(); dock.postInvalidate(); }
@@ -840,7 +798,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             grid.postInvalidate();
             dock.postInvalidate();
             if (gen == loadGen) {
-                cacheDark = dark; // the whole pass is done: now the cache really is this style
+                cacheDark = dark;
                 cacheSize = iconPx;
                 Icons.prune(this, used);
             }
@@ -850,10 +808,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
     private boolean drawerWarmed;
 
-    /**
-     * Draw the drawer once, practically invisible, so the first real swipe-up doesn't pay for
-     * rasterising every label and uploading the blur on its first frame.
-     */
     private void warmDrawer() {
         if (drawerWarmed || isDestroyed() || root.progress != 0f || !overlays.isEmpty()) return;
         drawerWarmed = true;
@@ -922,7 +876,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         return null;
     }
 
-    /** Launch with the app zooming out of its icon. */
     private void launch(AppGridView.AppEntry e, AppGridView from, int index) {
         if (e.blank || e.cn == null) return;
         Intent i = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
@@ -947,8 +900,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), o);
         } catch (Exception ignored) {}
     }
-
-    // ================================================================ menus & dock placing
 
     private void appMenu(final AppGridView.AppEntry e, float cx, float cy) {
         int[] loc = new int[2];
@@ -981,7 +932,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private final java.util.concurrent.ConcurrentHashMap<ComponentName, Object[]> shortcutCache =
             new java.util.concurrent.ConcurrentHashMap<>();
 
-    /** Called on finger-down over an icon: by the time a long-press fires, shortcuts are ready. */
     private void prefetchShortcuts(final AppGridView.AppEntry e) {
         if (e == null || e.blank || e.cn == null) return;
         Object[] hit = shortcutCache.get(e.cn);
@@ -1000,7 +950,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         return new ArrayList<>(fresh);
     }
 
-    /** The app's own shortcuts (chats, new tab, ...). Only a default launcher may read them. */
     private List<Popup.Item> loadShortcuts(AppGridView.AppEntry e) {
         List<Popup.Item> out = new ArrayList<>();
         try {
@@ -1013,7 +962,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             List<android.content.pm.ShortcutInfo> list = la.getShortcuts(q, android.os.Process.myUserHandle());
             if (list == null) return out;
             List<android.content.pm.ShortcutInfo> sorted = new ArrayList<>(list);
-            // manifest shortcuts first (stable), then dynamic ones by the app's own rank
+
             Collections.sort(sorted, (x, y) -> x.isDeclaredInManifest() != y.isDeclaredInManifest()
                     ? (x.isDeclaredInManifest() ? -1 : 1) : Integer.compare(x.getRank(), y.getRank()));
             int dpi = getResources().getDisplayMetrics().densityDpi;
@@ -1021,7 +970,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             for (final android.content.pm.ShortcutInfo si : sorted) {
                 if (out.size() == 4) break;
                 if (!si.isEnabled()) continue;
-                // only shortcuts for the icon that was pressed, and no repeated names
+
                 if (si.getActivity() != null && !si.getActivity().equals(e.cn)) continue;
                 CharSequence label = si.getShortLabel() != null ? si.getShortLabel() : si.getLongLabel();
                 if (label == null || !seen.add(label.toString().trim().toLowerCase(Locale.ROOT))) continue;
@@ -1039,8 +988,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         return out;
     }
 
-    // ================================================================ hidden apps
-
     private Set<String> hiddenSet() { return new HashSet<>(prefs.getStringSet("hidden", new HashSet<>())); }
 
     private void refreshDrawerList() {
@@ -1048,7 +995,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         List<AppGridView.AppEntry> l = new ArrayList<>();
         for (AppGridView.AppEntry e : all) if (!hidden.contains(e.cn.flattenToString())) l.add(e);
         drawerApps = l;
-        // no pill in the drawer: hidden apps show up in search, and "hidden" lists them all
+
         grid.setFooter(null);
         if (searching) filter(search.getText().toString());
         else { shown = drawerApps; grid.setItems(drawerApps); }
@@ -1097,7 +1044,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
     private void placeAt(int index) {
         AppGridView.AppEntry e = placing;
-        // if it's already in the dock, move it rather than duplicate it
+
         for (int i = 0; i < DOCK_SLOTS; i++) if (dockEntries[i] == e) dockEntries[i] = null;
         dockEntries[index] = e;
         saveDock();
@@ -1114,7 +1061,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         hideSnack();
     }
 
-    /** StatusBarManager.expandNotificationsPanel is hidden API, but launchers have used it for years. */
     @SuppressWarnings("JavaReflectionMemberAccess")
     private void expandNotifications() {
         try {
@@ -1126,9 +1072,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         }
     }
 
-    // ================================================================ drawer header
-
-    /** A greeting for the time of day, with a quiet live line under it. */
     private void updateHeader() {
         int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         String greet = h >= 5 && h < 12 ? "Good morning" : h >= 12 && h < 17 ? "Good afternoon"
@@ -1148,9 +1091,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         title.setText(s);
     }
 
-    // ================================================================ search
-
-    /** EditText is one of the heaviest stock views; it's only created when search is used. */
     private void ensureSearch() {
         if (search != null) return;
         search = new EditText(this);
@@ -1201,13 +1141,11 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         extras.setLayoutParams(ep);
     }
 
-    /** Push the app grid down to make room for the search extras (0 = normal position). */
     private void setGridTop(int extra) {
         FrameLayout.LayoutParams gp = (FrameLayout.LayoutParams) grid.getLayoutParams();
         int top = insetTop + dpi(92) + extra;
         if (gp.topMargin == top) return;
-        // the apps glide down to make room for the search extras (and back up): the layout
-        // moves at once, the grid's translation carries it smoothly from where it was
+
         float from = gp.topMargin - top + grid.getTranslationY();
         gp.topMargin = top;
         grid.setLayoutParams(gp);
@@ -1251,20 +1189,18 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         if (extras != null) extras.update(q);
         q = q.trim().toLowerCase(Locale.getDefault());
         if (q.isEmpty()) { shown = drawerApps; grid.setItems(drawerApps); return; }
-        // prefix matches (on any word) first, then anything containing the text
+
         List<AppGridView.AppEntry> starts = new ArrayList<>(), contains = new ArrayList<>();
         for (AppGridView.AppEntry e : all) {
             if (e.lower.startsWith(q) || e.lower.contains(" " + q)) starts.add(e);
             else if (e.lower.contains(q)) contains.add(e);
-            // "whatsapp" should still find "WA Business" (com.whatsapp.w4b)
+
             else if (q.length() >= 3 && e.cn.getPackageName().contains(q)) contains.add(e);
         }
         starts.addAll(contains);
         shown = starts;
         grid.setItems(starts);
     }
-
-    // ================================================================ snack
 
     private final Runnable hideSnackLater = this::hideSnack;
 
@@ -1298,8 +1234,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         snackView.animate().alpha(0f).translationY(dpi(8)).setDuration(180)
                 .withEndAction(() -> { if (snackView.getAlpha() == 0f) root.removeView(snackView); }).start();
     }
-
-    // ================================================================ WallpaperUi.Host
 
     @Override public Context context() { return this; }
     @Override public FrameLayout overlayParent() { return root; }
@@ -1342,12 +1276,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         sheet().open();
     }
 
-    // ================================================================ popup menu
-
-    /**
-     * The long-press card: app icon and name with round action buttons on top, the app's
-     * own shortcuts (round icons) in the middle, and one full-width action at the bottom.
-     */
     static final class Popup extends WallpaperUi.Overlay {
         static final int NORMAL = 0, ACCENT = 1, DANGER = 2;
 
@@ -1388,12 +1316,10 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             card.setOrientation(LinearLayout.VERTICAL);
             int cp = Ui.dpi(c, 6);
             card.setPadding(cp, cp, cp, cp);
-            // frosted like the sheet, with a firmer tint so it still stands out from the drawer behind it
+
             card.setBackground(Ui.frost(card, Ui.dp(c, 24), Ui.dark ? 0x99000000 : 0xC8F5F6F8));
             card.setClipToOutline(true);
 
-            // a titled list (hidden apps) says what it is; an app's menu doesn't need to, the
-            // app's own icon and name are right beside it
             if (appIcon == null && heading != null) {
                 TextView name = Ui.text(c, heading, 15, Ui.FG, true);
                 name.setTypeface(Ui.font(c, 600));
@@ -1401,7 +1327,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 card.addView(name, Ui.lp(-1, -2));
             }
 
-            // quick actions (shortcuts): compact rows
             for (final Item it : items) {
                 LinearLayout row = new LinearLayout(c);
                 row.setGravity(Gravity.CENTER_VERTICAL);
@@ -1429,7 +1354,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 card.addView(row, Ui.lp(-1, Ui.dpi(c, 44)));
             }
 
-            // the app's own actions: one tidy row of small buttons, each with a word under it
             if (!btns.isEmpty()) {
                 LinearLayout tray = new LinearLayout(c);
                 tray.setBackground(Ui.round(Ui.FILL, Ui.dp(c, 18)));
@@ -1450,7 +1374,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 card.addView(tray, Ui.lp(-1, -2, items.isEmpty() ? 0 : Ui.dpi(c, 6)));
             }
 
-            // one full-width action (lists that have one)
             if (primary != null) {
                 LinearLayout pill = new LinearLayout(c);
                 pill.setGravity(Gravity.CENTER);
@@ -1497,17 +1420,13 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         }
 
         @Override void animateOut(Runnable done) {
-            // Closing comes after an idle moment, when the GPU has clocked down; fading the card
-            // then cost ~20 ms frames. Dropping it instantly feels snappier and stays in budget.
             card.setVisibility(INVISIBLE);
             dim.animate().alpha(0f).setDuration(120).withEndAction(done).start();
         }
     }
 
-    // ================================================================ gestures
-
     final class Root extends FrameLayout {
-        float progress; // 0 closed .. 1 open
+        float progress;
         private float downX, downY, startProgress;
         private boolean dragging, homeLayered, barsDark = true, shadeFired;
 
@@ -1524,8 +1443,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
         private float travel() { return Math.max(1, getHeight()); }
 
-        // Home is static while it fades, so it rides a GPU layer. The drawer is not layered:
-        // its rows cascade during the transition, and a layer would be redrawn every frame.
         private void beginLayers() {
             if (homeLayered) return;
             homeLayered = true;
@@ -1544,7 +1461,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             boolean half = progress >= 0.5f;
             if (half == barsDark) { barsDark = !half; updateBars(); }
             drawerOpen = half;
-            grid.setReveal(1f); // the apps move as one, with the thumb
+            grid.setReveal(1f);
             if (progress <= 0f) {
                 drawer.setVisibility(View.INVISIBLE);
                 blurView.setVisibility(View.INVISIBLE);
@@ -1563,13 +1480,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 drawer.setVisibility(View.VISIBLE);
             }
             if (blurView.hasBlur() && blurView.getVisibility() != View.VISIBLE) blurView.setVisibility(View.VISIBLE);
-            // Smart Launcher's sequence (measured frame by frame on this phone), driven by the
-            // thumb: the further the pull, the further along.
-            //  first half: home (clock, dock) simply fades out where it is, no movement at all,
-            //   while the wallpaper darkens in place (still sharp)
-            //  second half: the apps fade in where they belong, rising the last few dp into
-            //   place over the drawer's deep background; closing runs it backwards
-            // (home is gone before the apps arrive, so the two never show through each other)
+
             float act1 = span(progress, 0f, 0.42f), act2 = span(progress, 0.42f, 0.68f);
             layDrawer();
             drawer.setAlpha(act2);
@@ -1582,7 +1493,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             }
 
             float f = span(progress, 0f, 0.42f);
-            float ha = 1f - f * f * (3f - 2f * f); // smoothstep: gentle at both ends
+            float ha = 1f - f * f * (3f - 2f * f);
             home.setAlpha(ha);
             int hv = ha <= 0f ? View.INVISIBLE : View.VISIBLE;
             if (home.getVisibility() != hv) home.setVisibility(hv);
@@ -1592,16 +1503,13 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             dock.setTranslationY(0f);
         }
 
-        /** 0 before `from`, 1 after `to`, straight in between. */
         private float span(float v, float from, float to) { return Math.max(0f, Math.min(1f, (v - from) / (to - from))); }
 
-        /** The apps rise the last few dp into place as they fade in (not all the way from the bottom). */
         private void layDrawer() {
             float rise = span(progress, 0.42f, 0.8f);
-            drawer.setTranslationY((1f - rise) * (1f - rise) * 36 * dp - over); // eases into place
+            drawer.setTranslationY((1f - rise) * (1f - rise) * 36 * dp - over);
         }
 
-        /** Pushed up past fully open: the drawer gives a little (pixels), then springs back. */
         private float over;
         private ValueAnimator overAnim;
 
@@ -1632,7 +1540,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
         void animateTo(float target) { animateTo(target, 0f); }
 
-        /** velocity: px/s toward the target. A flick finishes fast; a gentle release eases in. */
         void animateTo(final float target, float velocity) {
             if (anim != null) anim.cancel();
             releaseOver();
@@ -1642,8 +1549,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             long dur = Math.round(130 + 170 * dist);
             android.animation.TimeInterpolator curve = Ui.EMPHASIZED;
             if (velocity > 200f) {
-                // a flick carries on at the finger's own speed and eases to a stop there: a
-                // decelerating curve starts at twice its average speed, so the time is 2 x d / v
                 float px = dist * travel() * 0.45f;
                 dur = Math.max(120, Math.min(420, Math.round(2f * px / velocity * 1000f)));
                 curve = new android.view.animation.DecelerateInterpolator(1f);
@@ -1671,7 +1576,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                     if (vt != null) vt.recycle();
                     vt = VelocityTracker.obtain();
                     vt.addMovement(ev);
-                    // Catch the drawer mid-flight: grab it where it is and follow the finger.
+
                     if (animating()) {
                         anim.cancel();
                         startProgress = progress;
@@ -1693,7 +1598,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             if (placing != null) return false;
             float dy = ev.getY() - downY, dx = ev.getX() - downX;
             if (progress == 0f && dy > slop * 2 && Math.abs(dy) > Math.abs(dx) * 1.3f) {
-                // home screen, pulling down: hand off to the system's notification shade, once per gesture
                 if (!shadeFired) {
                     shadeFired = true;
                     removeCallbacks(homeLongPress);
@@ -1706,9 +1610,9 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 boolean closing = progress >= 0.5f && dy > 0 && grid.atTop() && !searching;
                 if (opening || closing) {
                     dragging = true;
-                    grid.setRevealOrigin(downX); // the apps ripple out from (and back into) the thumb
+                    grid.setRevealOrigin(downX);
                     removeCallbacks(homeLongPress);
-                    // start exactly where the finger is: no jump of `slop` pixels
+
                     downY = ev.getY() - Math.signum(dy) * slop * 0.5f;
                     startProgress = progress;
                     beginLayers();
@@ -1719,7 +1623,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         }
 
         private float distanceFor(float dy) {
-            // 1:1 with the finger over 45% of the screen: quick to complete, precise when slow
             return dy / (travel() * 0.45f);
         }
 
@@ -1748,7 +1651,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
                     removeCallbacks(homeLongPress);
-                    
+
                     if (dragging) {
                         vt.computeCurrentVelocity(1000);
                         float vy = vt.getYVelocity();
@@ -1769,7 +1672,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         }
     }
 
-    /** The current wallpaper, pre-blurred and tiny; scaled up it costs one textured quad. */
     static final class BlurView extends View {
         private android.graphics.Bitmap bmp;
         private final android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG);
@@ -1783,7 +1685,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
         void setBitmap(android.graphics.Bitmap b) { bmp = b; invalidate(); }
 
-        /** Darkens in the same draw call (a colour filter), so no extra full-screen pass. */
         void setDim(float f) {
             int v = Math.round(255 * f);
             paint.setColorFilter(f >= 1f ? null : new android.graphics.LightingColorFilter(Color.rgb(v, v, v), 0));

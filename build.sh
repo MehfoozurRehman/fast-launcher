@@ -1,12 +1,10 @@
 #!/bin/bash
-# Builds the launcher APK with plain SDK tools (no Gradle).
 set -e
 cd "$(dirname "$0")"
 SDK="/c/Users/Mehfo/AppData/Local/Android/Sdk"
 BT="$SDK/build-tools/36.0.0"
 JAR="$SDK/platforms/android-35/android.jar"
 rm -rf build && mkdir -p build/classes build/dex
-# the version names the exact commit, so a report from the phone maps to the code ("+" = uncommitted changes)
 VCODE=$(git rev-list --count HEAD 2>/dev/null || echo 1)
 VNAME="1.$VCODE-$(git rev-parse --short HEAD 2>/dev/null || echo dev)$(git diff --quiet HEAD 2>/dev/null || echo +)"
 "$BT/aapt2.exe" compile --dir res -o build/res.zip

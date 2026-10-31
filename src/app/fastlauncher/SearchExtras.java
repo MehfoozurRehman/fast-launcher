@@ -27,12 +27,7 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/**
- * Results under the drawer's search field, besides the matching apps: a calculator answer,
- * up to three contacts, and "Search the web". Contacts are read off the main thread.
- */
 final class SearchExtras extends LinearLayout {
-
     interface Host {
         void start(Intent i, View from);
         void snack(String msg);
@@ -48,8 +43,6 @@ final class SearchExtras extends LinearLayout {
     private String query = "", maths;
     private String shownContacts = "";
 
-    // Built once and reused while typing: a keystroke only changes text and visibility, and the
-    // contact rows are rebuilt only when the set of matching contacts actually changes.
     private final View mathsRow, webRow, hiddenRow;
     private final LinearLayout settingsBox;
     private String shownSettings = "";
@@ -73,7 +66,7 @@ final class SearchExtras extends LinearLayout {
         settingsBox = new LinearLayout(c);
         settingsBox.setOrientation(VERTICAL);
         settingsBox.setLayoutTransition(Ui.rows());
-        // look up which settings screens exist once, off the main thread, before the first keystroke
+
         final Context app = c.getApplicationContext();
         worker.execute(() -> Setting.all(app));
         addView(settingsBox, new LinearLayout.LayoutParams(-1, -2));
@@ -81,8 +74,7 @@ final class SearchExtras extends LinearLayout {
         addView(contactBox, new LinearLayout.LayoutParams(-1, -2));
         addView(webRow, rowLp());
         setVisibility(GONE);
-        // rows fade in and out and the others slide to make room; LayoutTransition copes with
-        // changes arriving faster than the animation (typing), unlike a scene transition
+
         setLayoutTransition(Ui.rows());
         contactBox.setLayoutTransition(Ui.rows());
     }
@@ -106,7 +98,7 @@ final class SearchExtras extends LinearLayout {
         maths = Calc.answer(q);
         if (maths != null) mathsTitle.setText("= " + maths);
         setVis(mathsRow, maths != null);
-        // the hidden apps live here, out of the drawer: type "hidden" (or the start of it)
+
         int hidden = q.length() >= 3 && "hidden".startsWith(q.toLowerCase(Locale.ROOT)) ? host.hiddenCount() : 0;
         hiddenShown = hidden > 0;
         if (hiddenShown) hiddenTitle.setText(hidden == 1 ? "1 hidden app" : hidden + " hidden apps");
@@ -116,7 +108,7 @@ final class SearchExtras extends LinearLayout {
         setVis(this, true);
         boolean lookup = q.length() >= 2
                 && getContext().checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED;
-        // the previous contacts stay up while the lookup runs (a few ms), so the grid doesn't jump twice
+
         if (!lookup) showContacts(new ArrayList<>());
         reportHeight();
         if (!lookup) return;
@@ -155,13 +147,11 @@ final class SearchExtras extends LinearLayout {
         }
     }
 
-    /** Fixed-height rows, so the height is arithmetic: no measure pass while typing. */
     private void reportHeight() {
         int rows = 1 + (maths != null ? 1 : 0) + (hiddenShown ? 1 : 0) + contactBox.getChildCount() + settingsBox.getChildCount();
         host.onExtrasHeight(rows * Ui.dpi(getContext(), 52 + 6) - Ui.dpi(getContext(), 6));
     }
 
-    /** Enter on the keyboard with no app match: the best extra (maths result copied, else the web). */
     void runDefault() {
         if (query.isEmpty()) return;
         if (maths != null) { copy(maths); return; }
@@ -211,10 +201,6 @@ final class SearchExtras extends LinearLayout {
         }
     }
 
-    /**
-     * Settings screens you can jump to from search ("wifi", "battery", "display"...). Each is
-     * listed only if the phone actually has that screen.
-     */
     static final class Setting {
         final String title, action;
         final String[] words;
@@ -263,7 +249,6 @@ final class SearchExtras extends LinearLayout {
             return all;
         }
 
-        /** Up to two screens whose name or a keyword starts with what was typed (2+ letters). */
         static List<Setting> match(Context c, String q) {
             List<Setting> out = new ArrayList<>();
             String t = q.trim().toLowerCase(Locale.ROOT);
@@ -313,8 +298,6 @@ final class SearchExtras extends LinearLayout {
         return r;
     }
 
-    // ---------------------------------------------------------------- contacts
-
     static final class Contact {
         long id;
         String name, number;
@@ -354,9 +337,6 @@ final class SearchExtras extends LinearLayout {
         return null;
     }
 
-    // ---------------------------------------------------------------- calculator
-
-    /** A small calculator: + - * / x × ÷ % ^, brackets and decimals. Null unless it's clearly maths. */
     static final class Calc {
         private final String s;
         private int i;
@@ -367,7 +347,7 @@ final class SearchExtras extends LinearLayout {
             String t = q.replace(" ", "").replace("×", "*").replace("÷", "/").replace(",", "");
             t = t.replaceAll("(?<=[0-9).])x(?=[0-9(.])", "*");
             if (!t.matches("[0-9.+\\-*/%^()]+") || !t.matches(".*[0-9].*")) return null;
-            if (!t.matches(".*[0-9)][+\\-*/%^].*")) return null; // needs an operator after a number
+            if (!t.matches(".*[0-9)][+\\-*/%^].*")) return null;
             try {
                 Calc c = new Calc(t);
                 double v = c.sum();
@@ -399,7 +379,7 @@ final class SearchExtras extends LinearLayout {
                 else if (ch == '/') { i++; v /= power(); }
                 else if (ch == '%') {
                     i++;
-                    // "50%" alone is 0.5; "10%3" is the remainder
+
                     if (i < s.length() && (Character.isDigit(s.charAt(i)) || s.charAt(i) == '(' || s.charAt(i) == '.')) v %= power();
                     else v /= 100;
                 }

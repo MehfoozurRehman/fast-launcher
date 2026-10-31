@@ -23,19 +23,15 @@ import android.view.animation.PathInterpolator;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-/** Small hand-drawn UI kit: everything is a plain View, no themes, no inflation. */
 final class Ui {
     private Ui() {}
 
-    // Palette for every surface the launcher draws over its own background (menus,
-    // sheets). It matches the system's own pop-ups and follows light/dark mode. Anything drawn straight on the wallpaper stays white.
     static boolean dark = true;
     static int FG, FG2, FG3, CARD, GROUP, FILL, ICON_BG, LINE, PRESS, HANDLE, SCRIM, BG,
             TRACK, STRONG, ON_STRONG, INK, ACCENT, DANGER, DANGER_BG;
 
     static { apply(true); }
 
-    /** Call before building any themed view, and again when the system switches modes. */
     static boolean theme(Context c) {
         int night = c.getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
         boolean d = night != android.content.res.Configuration.UI_MODE_NIGHT_NO;
@@ -45,10 +41,8 @@ final class Ui {
         return changed;
     }
 
-    /** The wallpaper's colour the accent is drawn from; 0 = none (a grey wallpaper): the default blue. */
     static int seed;
 
-    /** Remember a new wallpaper colour; true if the accent changes (the caller rebuilds). */
     static boolean setSeed(Context c, int s) {
         if (s == seed) return false;
         c.getSharedPreferences("ui", Context.MODE_PRIVATE).edit().putInt("seed", s).apply();
@@ -58,17 +52,13 @@ final class Ui {
         return before != ACCENT;
     }
 
-    /**
-     * Pick the accent from the wallpaper's main colours: the most colourful of them, in a soft,
-     * muted tone, and dark enough that white text on it stays readable.
-     */
     static int seedFrom(int[] colors) {
         int best = 0;
         float bestScore = 0f;
         for (int col : colors) {
             if (col == 0) continue;
             float[] hsl = hsl(col);
-            float chroma = hsl[1] * (1f - Math.abs(2f * hsl[2] - 1f)); // saturation that's actually visible
+            float chroma = hsl[1] * (1f - Math.abs(2f * hsl[2] - 1f));
             if (chroma > bestScore) { bestScore = chroma; best = col; }
         }
         return bestScore < 0.10f ? 0 : best | 0xFF000000;
@@ -77,11 +67,11 @@ final class Ui {
     private static int accentFor(int seed, boolean dark) {
         if (seed == 0) return dark ? 0xFF3D7FFF : 0xFF256FFF;
         float[] hsl = hsl(seed);
-        // soft, muted tones: the wallpaper's hue at a gentle saturation, not a loud one
+
         float s = Math.max(0.26f, Math.min(0.46f, hsl[1] * 0.7f));
         float l = dark ? 0.56f : 0.50f;
         int c = fromHsl(hsl[0], s, l);
-        // white text sits on the accent (active tiles, buttons): keep its luminance below ~0.28
+
         while (luminance(c) > 0.28f && l > 0.2f) { l -= 0.02f; c = fromHsl(hsl[0], s, l); }
         return c;
     }
@@ -129,7 +119,6 @@ final class Ui {
     private static void apply(boolean d) {
         dark = d;
         if (d) {
-            // surfaces inside cards are see-through, so frosted cards stay glassy
             CARD = 0xFF2E2E2E; GROUP = 0x1AFFFFFF; FILL = 0x24FFFFFF; ICON_BG = 0x2EFFFFFF;
             FG = 0xFFEAEAEA; FG2 = 0xFFA9A9A9; FG3 = 0xFF8C8C8C;
             LINE = 0x1AFFFFFF; PRESS = 0x1FFFFFFF; HANDLE = 0x52FFFFFF; SCRIM = 0xB3000000; BG = 0xFF1F1F1F;
@@ -151,7 +140,6 @@ final class Ui {
 
     private static final java.util.HashMap<Integer, Typeface> FONTS = new java.util.HashMap<>();
 
-    /** Montserrat (bundled, OFL) at any weight from its variable font; system font as fallback. */
     static Typeface font(Context c, int weight) {
         Typeface t = FONTS.get(weight);
         if (t != null) return t;
@@ -166,7 +154,6 @@ final class Ui {
         return t;
     }
 
-    /** A rounded inner card that groups related settings. */
     static LinearLayout group(Context c) {
         LinearLayout g = new LinearLayout(c);
         g.setOrientation(LinearLayout.VERTICAL);
@@ -176,11 +163,9 @@ final class Ui {
         return g;
     }
 
-    /** Any drawable, rendered and cropped to a circle (contact photos, shortcut icons). */
     static android.graphics.drawable.Drawable circle(Context c, android.graphics.drawable.Drawable d, int px) {
         Bitmap src = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888);
         if (d instanceof android.graphics.drawable.AdaptiveIconDrawable) {
-            // draw both layers edge to edge, skipping the system mask, then crop round
             android.graphics.drawable.AdaptiveIconDrawable a = (android.graphics.drawable.AdaptiveIconDrawable) d;
             int ext = Math.round(px * 0.25f);
             Canvas cv = new Canvas(src);
@@ -199,16 +184,10 @@ final class Ui {
         return new android.graphics.drawable.BitmapDrawable(c.getResources(), out);
     }
 
-    /**
-     * Shortcut icons that are just a drawing on a see-through background (Facebook's are black
-     * line art meant to be tinted by the app's own theme) vanish on a dark card. Put them on a
-     * soft accent circle; a one-colour drawing is tinted the accent, a colourful one kept as is.
-     * Returns null for normal, filled icons.
-     */
     private static Bitmap glyphIcon(Bitmap src, int px) {
         int[] p = new int[px * px];
         src.getPixels(p, 0, px, 0, 0, px, px);
-        float r = px / 2f, r2 = r * r * 0.81f; // judge the inner circle, where a filled icon is solid
+        float r = px / 2f, r2 = r * r * 0.81f;
         int inside = 0, clear = 0, opaque = 0;
         long sr = 0, sg = 0, sb = 0;
         int minL = 255, maxL = 0, chroma = 0;
@@ -227,8 +206,7 @@ final class Ui {
         }
         if (inside == 0 || opaque == 0) return null;
         boolean mono = maxL - minL < 60 && chroma < 60;
-        // a big near-black drawing (a solid bell, a filled square) is just as invisible on a
-        // dark card even though it covers most of the circle: catch it by its see-through corners
+
         int clearAll = 0;
         for (int c : p) if ((c >>> 24) < 24) clearAll++;
         boolean darkGlyph = mono && maxL < 80 && clearAll > p.length * 0.12f;
@@ -240,27 +218,19 @@ final class Ui {
         cv.drawCircle(r, r, r, bg);
         Paint fg = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
         if (mono) fg.setColorFilter(new android.graphics.PorterDuffColorFilter(dark ? 0xFF8AB4FF : ACCENT, android.graphics.PorterDuff.Mode.SRC_IN));
-        float inset = px * 0.2f; // the drawing sits inside the circle with some air around it
+        float inset = px * 0.2f;
         cv.drawBitmap(src, null, new RectF(inset, inset, px - inset, px - inset), fg);
         return out;
     }
 
     static float dp(Context c, float v) { return v * c.getResources().getDisplayMetrics().density; }
 
-    /**
-     * Rubber band: how far something follows a finger pulled `over` pixels past where it should
-     * stop. It follows at first and gives less and less, never going past `dim` (iOS's curve).
-     */
     static float rubber(float over, float dim) {
         float a = Math.abs(over);
         return Math.signum(over) * (1f - 1f / (a * 0.55f / dim + 1f)) * dim;
     }
     static int dpi(Context c, float v) { return Math.round(dp(c, v)); }
 
-    /**
-     * One shared motion for content changes (rows appearing, lists closing up, things making
-     * room): fade and move together, on the launcher's emphasized curve.
-     */
     static android.transition.Transition motion() {
         android.transition.TransitionSet t = new android.transition.TransitionSet();
         t.setOrdering(android.transition.TransitionSet.ORDERING_TOGETHER);
@@ -271,7 +241,6 @@ final class Ui {
         return t;
     }
 
-    /** Rows that fade in/out while their neighbours slide, for lists that change as you type. */
     static android.animation.LayoutTransition rows() {
         android.animation.LayoutTransition t = new android.animation.LayoutTransition();
         t.enableTransitionType(android.animation.LayoutTransition.CHANGING);
@@ -285,7 +254,6 @@ final class Ui {
         return t;
     }
 
-    /** Show or hide with a short fade instead of popping. */
     static void fadeVisible(final View v, boolean show) {
         if (show == (v.getVisibility() == View.VISIBLE) && v.getAlpha() == (show ? 1f : v.getAlpha())) return;
         v.animate().cancel();
@@ -297,22 +265,12 @@ final class Ui {
         }
     }
 
-    /** The blurred wallpaper (same picture the drawer uses); null when the wallpaper isn't ours. */
     static Bitmap frostSource;
 
-    /**
-     * Frosted glass for launcher cards: the blurred wallpaper that sits behind the card, lined
-     * up with the screen, under a light tint. Falls back to a plain card colour without a blur.
-     */
-    /**
-     * Frosted glass card: the blurred wallpaper under it, a touch magnified (a lens) and more
-     * saturated (colour glows through), under a flat tint. Plain: no gradients, no outline.
-     */
     static android.graphics.drawable.Drawable frost(final View owner, final float radius) {
         return frost(owner, radius, dark ? 0x52000000 : 0xA3F5F6F8);
     }
 
-    /** The same glass with a chosen tint (a firmer one for a card that sits over busy content). */
     static android.graphics.drawable.Drawable frost(final View owner, final float radius, final int tint) {
         return new android.graphics.drawable.Drawable() {
             private final Paint bmp = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG);
@@ -321,7 +279,6 @@ final class Ui {
             private final Matrix m = new Matrix();
             private final int[] loc = new int[2];
             {
-                // vibrancy: the colour of what's behind comes through brighter
                 android.graphics.ColorMatrix cm = new android.graphics.ColorMatrix();
                 cm.setSaturation(1.45f);
                 bmp.setColorFilter(new android.graphics.ColorMatrixColorFilter(cm));
@@ -331,7 +288,7 @@ final class Ui {
                 android.graphics.Rect b = getBounds();
                 clip.reset();
                 clip.addRoundRect(b.left, b.top, b.right, b.bottom, radius, radius, android.graphics.Path.Direction.CW);
-                Bitmap src = frostSource; // read at draw time: the blur may load after the card is built
+                Bitmap src = frostSource;
                 if (src == null) {
                     fill.setColor(CARD);
                     c.drawPath(clip, fill);
@@ -339,11 +296,9 @@ final class Ui {
                 }
                 int save = c.save();
                 c.clipPath(clip);
-                // map the screen-sized blur so the part under the card is what shows through
+
                 android.util.DisplayMetrics dm = owner.getResources().getDisplayMetrics();
-                // line up with where the card rests, not where an animation has it right now: the
-                // first frame is drawn while it's still off-screen (and often cached in a layer),
-                // which used to leave the glass empty until the card stopped moving
+
                 int x = owner.getLeft(), y = owner.getTop();
                 if (owner.getParent() instanceof View) {
                     ((View) owner.getParent()).getLocationOnScreen(loc);
@@ -353,7 +308,7 @@ final class Ui {
                 float s = Math.max(dm.widthPixels / (float) src.getWidth(), dm.heightPixels / (float) src.getHeight());
                 m.setScale(s, s);
                 m.postTranslate(-x, -y);
-                // the lens: magnify about the card's centre a little
+
                 m.postScale(1.06f, 1.06f, b.exactCenterX(), b.exactCenterY());
                 c.drawBitmap(src, m, bmp);
                 fill.setColor(tint);
@@ -371,7 +326,6 @@ final class Ui {
         };
     }
 
-    /** A flat tile (groups, rows): a plain rounded fill, no gradients. */
     static android.graphics.drawable.Drawable glass(int color, final float radius) {
         final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
         fill.setColor(color);
@@ -415,7 +369,6 @@ final class Ui {
         return t;
     }
 
-    /** Gentle press-to-shrink feedback for anything tappable. */
     static void pressable(final View v) {
         v.setOnTouchListener(new View.OnTouchListener() {
             @Override public boolean onTouch(View view, MotionEvent e) {
@@ -442,12 +395,9 @@ final class Ui {
         return p;
     }
 
-    // ------------------------------------------------------------------ glyphs
-
     static final int G_SEARCH = 0, G_SHUFFLE = 1, G_GRID = 2, G_BACK = 3, G_CHECK = 4, G_SPIN = 5, G_EYE = 6,
             G_INFO = 7, G_HIDE = 8, G_TRASH = 9, G_DOCK = 10, G_MINUS = 11;
 
-    /** Line-art glyphs drawn on a 24-unit grid. */
     static final class Glyph extends View {
         int type;
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -497,7 +447,7 @@ final class Ui {
                     }
                     break;
                 }
-                case G_BACK: // an arrow: a short shaft and an open head, rounded
+                case G_BACK:
                     p.setStrokeWidth(2.1f);
                     path.moveTo(19.5f, 12); path.lineTo(5, 12);
                     path.moveTo(11.5f, 5.5f); path.lineTo(5, 12); path.lineTo(11.5f, 18.5f);
@@ -558,8 +508,6 @@ final class Ui {
         }
     }
 
-    // ------------------------------------------------------------------ pill button
-
     static final class Pill extends LinearLayout {
         final Glyph glyph;
         final TextView label;
@@ -596,8 +544,6 @@ final class Ui {
         }
     }
 
-    // ------------------------------------------------------------------ chip
-
     static final class Chip extends TextView {
         private boolean on;
 
@@ -625,7 +571,6 @@ final class Ui {
         }
     }
 
-    /** Wraps children onto rows. */
     static final class Flow extends ViewGroup {
         private final int gap;
 
@@ -658,14 +603,12 @@ final class Ui {
         }
     }
 
-    // ------------------------------------------------------------------ segmented control
-
     interface OnPick { void onPick(int index); }
 
     static final class Segmented extends View {
         private final String[] options;
         private int selected;
-        private float pos; // animated indicator position, in segments
+        private float pos;
         private OnPick listener;
         private final Paint track = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint thumb = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -725,7 +668,6 @@ final class Ui {
         }
     }
 
-    /** Shows a bitmap centre-cropped into a rounded rect, over a placeholder colour. */
     static final class RoundImage extends View {
         private Bitmap bmp;
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);

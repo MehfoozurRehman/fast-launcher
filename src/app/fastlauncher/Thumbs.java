@@ -13,10 +13,6 @@ import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-/**
- * Thumbnail loader for the wallpaper grid. Newest requests run first (LIFO), so when you
- * fling through the grid the tiles you stop on load before the ones you flew past.
- */
 final class Thumbs {
     interface Ready { void onThumbReady(); }
 
@@ -40,7 +36,6 @@ final class Thumbs {
         pool.allowCoreThreadTimeOut(true);
     }
 
-    /** Thumbnails kept on disk too (set once from a context), so they come back instantly later. */
     static volatile java.io.File disk;
     private static final long DISK_MAX = 30L * 1024 * 1024;
 
@@ -51,7 +46,6 @@ final class Thumbs {
         return new java.io.File(dir, Integer.toHexString(url.hashCode()) + "_" + url.length() + ".img");
     }
 
-    /** Keep the disk cache under its cap: the oldest files go first. */
     private static void trimDisk() {
         java.io.File dir = disk;
         java.io.File[] fs = dir == null ? null : dir.listFiles();
@@ -105,7 +99,6 @@ final class Thumbs {
         return null;
     }
 
-    /** 0..1 fade-in progress for a tile that just arrived. */
     float fade(String url) {
         Long t = loadedAt.get(url);
         if (t == null) return 1f;

@@ -9,9 +9,7 @@ import android.service.notification.StatusBarNotification;
 import java.util.HashMap;
 import java.util.Map;
 
-/** Keeps a per-package count of unread notifications for the badges on icons (main thread only). */
 public class NotifService extends NotificationListenerService {
-
     interface Changed { void onNotifCountsChanged(); }
 
     static volatile Map<String, Integer> counts = new HashMap<>();
@@ -23,7 +21,7 @@ public class NotifService extends NotificationListenerService {
     @Override public void onListenerConnected() {
         Diag.install(this);
         running = this;
-        HomeGuard.check(this); // this service outlives the launcher's UI: it notices if we stop being home
+        HomeGuard.check(this);
         refresh();
     }
 
@@ -31,8 +29,6 @@ public class NotifService extends NotificationListenerService {
 
     @Override public void onNotificationRemoved(StatusBarNotification sbn) { refresh(); }
 
-    // Honor may unbind listeners under memory pressure; ask to be bound again rather than
-    // leaving the badges silently empty
     @Override public void onListenerDisconnected() {
         if (running == this) running = null;
         main.post(() -> {
@@ -51,7 +47,7 @@ public class NotifService extends NotificationListenerService {
                     Notification n = s.getNotification();
                     boolean ongoing = (n.flags & Notification.FLAG_ONGOING_EVENT) != 0;
                     boolean summary = (n.flags & Notification.FLAG_GROUP_SUMMARY) != 0;
-                    // badges count only real messages (not charging, downloads, group headers, ours)
+
                     if (summary || ongoing || getPackageName().equals(s.getPackageName())) continue;
                     Integer c = next.get(s.getPackageName());
                     next.put(s.getPackageName(), c == null ? 1 : c + 1);

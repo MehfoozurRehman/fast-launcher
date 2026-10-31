@@ -37,7 +37,6 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Wallpapers from wallhaven.cc: search, pick, download, crop to the screen, set, remember. */
 final class Walls {
     private Walls() {}
 
@@ -92,8 +91,6 @@ final class Walls {
         int lastPage = 1;
     }
 
-    // ------------------------------------------------------------------ network
-
     static byte[] get(String url, int timeoutMs) throws IOException {
         IOException last = null;
         for (int attempt = 0; attempt < 3; attempt++) {
@@ -103,7 +100,7 @@ final class Walls {
             c.setRequestProperty("User-Agent", "FastLauncher/0.3 (github.com/MehfoozurRehman/fast-launcher)");
             try {
                 int code = c.getResponseCode();
-                if (code == 429) { // wallhaven allows 45 calls a minute
+                if (code == 429) {
                     last = new IOException("wallhaven is busy, try again in a moment");
                     sleep(1500L * (attempt + 1));
                     continue;
@@ -180,8 +177,6 @@ final class Walls {
         return p;
     }
 
-    // ------------------------------------------------------------------ preferences
-
     static SharedPreferences prefs(Context c) { return c.getSharedPreferences("walls", Context.MODE_PRIVATE); }
 
     static Set<String> themes(Context c) {
@@ -198,7 +193,6 @@ final class Walls {
         return out;
     }
 
-    /** 0 = off, otherwise days. */
     static int interval(Context c) { return prefs(c).getInt("interval", 2); }
 
     static void setInterval(Context c, int days) {
@@ -214,7 +208,6 @@ final class Walls {
 
     static long lastChange(Context c) { return prefs(c).getLong("lastChange", 0); }
 
-    /** First run: start the clock now instead of replacing the user's wallpaper on install. */
     static void init(Context c) {
         SharedPreferences p = prefs(c);
         if (!p.contains("lastChange")) p.edit().putLong("lastChange", System.currentTimeMillis()).apply();
@@ -244,15 +237,13 @@ final class Walls {
         prefs(c).edit().putString(key, android.text.TextUtils.join(",", l)).apply();
     }
 
-    // ------------------------------------------------------------------ scheduling
-
     private static final int JOB_ID = 4411;
 
     static void schedule(Context c) {
         JobScheduler js = (JobScheduler) c.getSystemService(Context.JOB_SCHEDULER_SERVICE);
         if (js == null) return;
         if (interval(c) == 0) { js.cancel(JOB_ID); return; }
-        // Wake every few hours and only act when due; survives the OEM delaying jobs.
+
         JobInfo ji = new JobInfo.Builder(JOB_ID, new ComponentName(c, WallJob.class))
                 .setPeriodic(TimeUnit.HOURS.toMillis(4))
                 .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
@@ -264,14 +255,11 @@ final class Walls {
         }
     }
 
-    // ------------------------------------------------------------------ picking and applying
-
     private static final AtomicBoolean busy = new AtomicBoolean();
     private static final Random rnd = new Random();
 
     static boolean isBusy() { return busy.get(); }
 
-    /** A fresh random wallpaper from the chosen themes, skipping history and dislikes. */
     static Wall pickRandom(Context c) throws Exception {
         List<Theme> pool = selectedThemes(c);
         Set<String> skip = idSet(c, "history");
@@ -300,13 +288,12 @@ final class Walls {
         return new int[]{w, h};
     }
 
-    /** Decodes with subsampling, then centre-crops to exactly w x h. */
     static Bitmap decodeForScreen(byte[] data, int w, int h) throws IOException {
         BitmapFactory.Options o = new BitmapFactory.Options();
         o.inJustDecodeBounds = true;
         BitmapFactory.decodeByteArray(data, 0, data.length, o);
         if (o.outWidth <= 0 || o.outHeight <= 0) throw new IOException("Not an image");
-        // halve while the decoded image would still fully cover the screen
+
         int sample = 1;
         while (o.outWidth / (sample * 2) >= w && o.outHeight / (sample * 2) >= h) sample *= 2;
         BitmapFactory.Options d = new BitmapFactory.Options();
@@ -328,10 +315,6 @@ final class Walls {
         return decodeForScreen(get(w.full, 30000), s[0], s[1]);
     }
 
-    /**
-     * Lets the visible launcher hide the system's wallpaper swap: Android tears down and
-     * rebinds its wallpaper window when a new image is set, which shows as a black blink.
-     */
     interface Cover {
         void show(Bitmap next, Runnable ready);
         void settle();
@@ -339,7 +322,6 @@ final class Walls {
 
     static volatile Cover cover;
 
-    /** Sets the wallpaper. Pass a ready bitmap (from a preview) to skip the download. */
     static void apply(Context c, Wall w, Bitmap ready) throws Exception {
         Bitmap b = ready != null ? ready : download(c, w);
         WallpaperManager wm = WallpaperManager.getInstance(c);
@@ -360,8 +342,6 @@ final class Walls {
         saveBlur(c, w, b);
     }
 
-    // ------------------------------------------------------------------ drawer blur
-
     private static java.io.File blurFile(Context c) { return new java.io.File(c.getFilesDir(), "blur.png"); }
 
     private static int wallpaperId(Context c) {
@@ -369,7 +349,6 @@ final class Walls {
         catch (Throwable t) { return -1; }
     }
 
-    /** A tiny, heavily blurred copy of the wallpaper we just set, for behind the drawer. */
     static void saveBlur(Context c, Wall w, Bitmap full) {
         try {
             Bitmap src = full;
@@ -396,7 +375,6 @@ final class Walls {
         } catch (Exception ignored) {}
     }
 
-    /** The current home wallpaper as a bitmap, or null when Android won't let us read it. */
     private static Bitmap systemWallpaper(Context c) {
         try {
             if (android.os.Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) return null;
@@ -416,11 +394,9 @@ final class Walls {
         }
     }
 
-    /** The blur for the current wallpaper, or null if the wallpaper wasn't set by us. */
-    /** The drawer backdrop, already darkened where needed, plus how bright the wallpaper's top is. */
     static final class Blur {
         final Bitmap bitmap;
-        final float topLuma; // 0..1 relative luminance of the top third of the wallpaper
+        final float topLuma;
         Blur(Bitmap bitmap, float topLuma) { this.bitmap = bitmap; this.topLuma = topLuma; }
     }
 
@@ -428,15 +404,12 @@ final class Walls {
         SharedPreferences p = prefs(c);
         int id = wallpaperId(c);
         if (!blurFile(c).exists() || p.getInt("blurFor", -2) != id) {
-            // not one of ours (a photo set from the gallery, say): blur the system's wallpaper
-            // itself; reading it needs all-files access on Android 13+ (granted once over adb)
             Bitmap sys = systemWallpaper(c);
             if (sys != null) {
                 saveBlur(c, null, sys);
                 sys.recycle();
                 try { WallpaperManager.getInstance(c).forgetLoadedWallpaper(); } catch (Exception ignored) {}
             } else {
-                // first run after an update: the current wallpaper may be ours but unblurred
                 Wall cur = current(c);
                 if (cur == null || p.contains("blurFor")) return null;
                 saveBlur(c, cur, null);
@@ -451,7 +424,6 @@ final class Walls {
         return new Blur(Icons.toHardware(b), top);
     }
 
-    // white text needs about 4.5:1 contrast: (1.0 + 0.05) / (L + 0.05) >= 4.5  ->  L <= ~0.18
     private static final float TEXT_SAFE_LUMA = 0.16f;
 
     private static float lin(int c8) {
@@ -459,11 +431,6 @@ final class Walls {
         return c <= 0.04045f ? c / 12.92f : (float) Math.pow((c + 0.055f) / 1.055f, 2.4f);
     }
 
-    /**
-     * Darkens the blurred wallpaper band by band, only as much as white text needs: a pale sky
-     * gets dimmed, already-dark areas are left alone. Done once on a worker thread and baked
-     * into the bitmap, so drawing the drawer costs nothing extra. Returns the top's brightness.
-     */
     static float readable(Bitmap b) {
         int w = b.getWidth(), h = b.getHeight();
         int[] px = new int[w * h];
@@ -478,13 +445,13 @@ final class Walls {
                 rowLuma[x] = 0.2126f * lin((p >> 16) & 255) + 0.7152f * lin((p >> 8) & 255) + 0.0722f * lin(p & 255);
             }
             java.util.Arrays.sort(rowLuma);
-            float l90 = rowLuma[(int) (w * 0.9f)]; // judge by the brighter parts of the row
+            float l90 = rowLuma[(int) (w * 0.9f)];
             if (y < topRows) topSum += rowLuma[w / 2];
-            // scaling sRGB by f scales linear luminance by about f^2.2
+
             factor[y] = l90 <= TEXT_SAFE_LUMA ? 1f
                     : Math.max(0.3f, (float) Math.pow(TEXT_SAFE_LUMA / l90, 1 / 2.2));
         }
-        // smooth so the darkening has no visible bands
+
         float[] smooth = new float[h];
         int r = Math.max(2, h / 20);
         for (int y = 0; y < h; y++) {
@@ -496,10 +463,10 @@ final class Walls {
                 sum += factor[yy];
                 n++;
             }
-            smooth[y] = 0.6f * min + 0.4f * (sum / n); // lean towards the darker neighbour
+            smooth[y] = 0.6f * min + 0.4f * (sum / n);
         }
         for (int y = 0; y < h; y++) {
-            float f = smooth[y] * 0.94f; // a touch of depth everywhere
+            float f = smooth[y] * 0.94f;
             for (int x = 0; x < w; x++) {
                 int i = y * w + x, p = px[i];
                 int rr = Math.round(((p >> 16) & 255) * f), gg = Math.round(((p >> 8) & 255) * f), bb = Math.round((p & 255) * f);
@@ -510,7 +477,6 @@ final class Walls {
         return topSum / topRows;
     }
 
-    /** Separable box blur in place; three passes approximate a gaussian. */
     static void boxBlur(Bitmap b, int r) {
         int w = b.getWidth(), h = b.getHeight();
         int[] px = new int[w * h], tmp = new int[w * h];
@@ -542,7 +508,6 @@ final class Walls {
         }
     }
 
-    /** Picks and applies a new random wallpaper; optionally marks the current one disliked. */
     static Wall next(Context c, boolean dislikeCurrent) throws Exception {
         if (!busy.compareAndSet(false, true)) throw new Exception("Already changing the wallpaper");
         try {

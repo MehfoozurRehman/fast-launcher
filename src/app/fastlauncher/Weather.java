@@ -19,7 +19,6 @@ import java.util.Locale;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 
-/** Current conditions from open-meteo.com (free, no key), for the line under the clock. */
 final class Weather {
     private Weather() {}
 
@@ -46,7 +45,7 @@ final class Weather {
         n.kind = p.getInt("kind", CLEAR);
         n.day = p.getBoolean("day", true);
         n.at = p.getLong("at", 0);
-        // a reading older than 6 hours is worse than none
+
         return System.currentTimeMillis() - n.at > 6 * 3600_000L ? null : n;
     }
 
@@ -54,7 +53,6 @@ final class Weather {
         return System.currentTimeMillis() - prefs(c).getLong("at", 0) > FRESH_MS;
     }
 
-    /** WMO weather interpretation codes, folded into the glyphs we draw. */
     static int kindFor(int code) {
         if (code == 0) return CLEAR;
         if (code == 1 || code == 2) return PARTLY;
@@ -62,10 +60,9 @@ final class Weather {
         if (code == 45 || code == 48) return FOG;
         if ((code >= 71 && code <= 77) || code == 85 || code == 86) return SNOW;
         if (code >= 95) return STORM;
-        return RAIN; // drizzle, rain, freezing rain, showers
+        return RAIN;
     }
 
-    /** Coarse location: last known if recent enough, otherwise one fresh network fix. */
     static void locate(Context c, Executor ex, Consumer<Location> done) {
         LocationManager lm = (LocationManager) c.getSystemService(Context.LOCATION_SERVICE);
         if (lm == null || !hasPermission(c)) { done.accept(null); return; }
@@ -88,7 +85,6 @@ final class Weather {
         }
     }
 
-    /** Blocking fetch; call off the UI thread. */
     static Now fetch(Context c, double lat, double lon) throws Exception {
         String url = String.format(Locale.US,
                 "https://api.open-meteo.com/v1/forecast?latitude=%.3f&longitude=%.3f&current=temperature_2m,weather_code,is_day",
@@ -104,9 +100,6 @@ final class Weather {
         return n;
     }
 
-    // ------------------------------------------------------------------ glyph
-
-    /** Weather icons drawn in the same line-art language as the rest of the launcher. */
     static final class Glyph extends View {
         int kind = CLOUDY;
         boolean day = true;
@@ -125,7 +118,7 @@ final class Weather {
             stroke.setShadowLayer(3 * d, 0, d, 0x40000000);
             fill.setColor(0xFFFFFFFF);
             fill.setShadowLayer(3 * d, 0, d, 0x40000000);
-            setLayerType(LAYER_TYPE_SOFTWARE, null); // shadow layers on paths
+            setLayerType(LAYER_TYPE_SOFTWARE, null);
         }
 
         void set(int kind, boolean day) {
@@ -146,7 +139,6 @@ final class Weather {
 
         private final Path bite = new Path();
 
-        /** A clean crescent: one circle with another bitten out of its upper right. */
         private void moon(Canvas c, float cx, float cy, float rad) {
             path.reset();
             bite.reset();
@@ -157,7 +149,6 @@ final class Weather {
         }
 
         private void cloud(Canvas c, float x, float y, float w) {
-            // a soft three-bump cloud on a 24-unit grid scaled to width w
             float u = w / 16f;
             path.reset();
             path.moveTo(x + 3 * u, y + 10 * u);

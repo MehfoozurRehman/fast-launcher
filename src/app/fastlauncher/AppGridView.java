@@ -25,12 +25,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-/**
- * One view that draws a whole grid of pre-rendered icon bitmaps. No child views, no
- * layouts: scrolling is a translate + drawBitmap on the visible rows only.
- */
 final class AppGridView extends View {
-
     static final class AppEntry {
         String label, lower, drawLabel;
         ComponentName cn;
@@ -69,8 +64,8 @@ final class AppGridView extends View {
     private final Paint footerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint footerText = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-    private final OverScroller scroller;  // null when the grid doesn't scroll
-    private final EdgeEffect bottomEdge;  // null when the grid doesn't scroll
+    private final OverScroller scroller;
+    private final EdgeEffect bottomEdge;
     private VelocityTracker vt;
     private final int slop, minFling, maxFling;
     private float off;
@@ -104,7 +99,7 @@ final class AppGridView extends View {
         this.labelGap = 7 * d;
         if (scrollable) {
             scroller = new OverScroller(c);
-            scroller.setFriction(ViewConfiguration.getScrollFriction() * 0.7f); // longer, freer flings
+            scroller.setFriction(ViewConfiguration.getScrollFriction() * 0.7f);
             bottomEdge = new EdgeEffect(c);
         } else {
             scroller = null;
@@ -136,7 +131,6 @@ final class AppGridView extends View {
         footerText.setTextSize(13 * c.getResources().getDisplayMetrics().scaledDensity);
     }
 
-    /** A quiet pill under the last row (e.g. "3 hidden apps"); null hides it. */
     void setFooter(String text) {
         footer = text;
         invalidate();
@@ -156,7 +150,6 @@ final class AppGridView extends View {
     void setBottomInset(int px) { bottomPad = px + 14 * density; invalidate(); }
 
     void setItems(List<AppEntry> list) {
-        // an install/uninstall can swap the list while a finger is down: forget that press
         handler.removeCallbacks(longPress);
         pressedIndex = -1;
         items = list;
@@ -174,7 +167,6 @@ final class AppGridView extends View {
         invalidate();
     }
 
-    /** Dashed outlines on every slot, used when choosing where to put an app. */
     void setSlotOutlines(boolean on) {
         slots = on;
         slotsSince = SystemClock.uptimeMillis();
@@ -183,19 +175,16 @@ final class AppGridView extends View {
 
     boolean atTop() { return off <= 0.5f; }
 
-    /** 0..1 drawer progress: rows rise and fade in one after another while it opens. */
     void setReveal(float p) {
         if (p == reveal) return;
         reveal = p;
         invalidate();
     }
 
-    /** Where the wave of icons starts (the thumb's x; it rises from the bottom edge). */
     private float originX = -1f;
 
     void setRevealOrigin(float x) { originX = x; }
 
-    /** Ease out with a small overshoot: past 1 a little, then back, like something settling. */
     private static float settle(float t) {
         float c1 = 1.35f, c3 = c1 + 1f, u = t - 1f;
         return 1f + c3 * u * u * u + c1 * u * u;
@@ -263,9 +252,6 @@ final class AppGridView extends View {
                 float cx = padX + (c + 0.5f) * cw;
                 int save = -1;
                 if (revealing) {
-                    // a soft wave from the thumb: icons nearest it come first, each fading in and
-                    // growing into place (no sliding), settling with a hint of bounce; closing runs
-                    // it backwards
                     float ox = originX < 0 ? getWidth() / 2f : originX, oy = h + 40 * density;
                     float iy = top + iconSize / 2f;
                     float dist = (float) Math.hypot(cx - ox, iy - oy) / (float) Math.hypot(getWidth(), h + 40 * density);

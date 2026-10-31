@@ -7,7 +7,6 @@ import android.graphics.Path;
 import android.graphics.RectF;
 import android.view.View;
 
-/** Line icons for the control panel, drawn on a 24-unit grid in the launcher's stroke style. */
 final class PanelIcons extends View {
     static final int WIFI = 0, HOTSPOT = 1, ROTATE = 2, TORCH = 3, BLUETOOTH = 4, DND = 5, DATA = 6,
             LOCATION = 7, PLANE = 8, BATTERY = 9, SCREENSHOT = 10, LOCK = 11, GEAR = 12, SUN = 13,

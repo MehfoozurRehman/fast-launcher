@@ -24,11 +24,6 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 
-/**
- * Keeps the launcher healthy and reportable without a computer attached:
- *  - a small on-phone log of crashes and warnings (last ~64 KB),
- *  - a plain-text report (version, what's switched on, recent log) to share from the phone.
- */
 final class Diag {
     private Diag() {}
 
@@ -49,7 +44,6 @@ final class Diag {
         });
     }
 
-    /** A warning worth seeing in a report; also goes to logcat. */
     static void log(String msg) {
         android.util.Log.w("FastLauncher", msg);
         write(msg);
@@ -68,7 +62,6 @@ final class Diag {
         } catch (Exception ignored) {}
     }
 
-    /** Keep the newer half. */
     private static void trim(File f) throws Exception {
         byte[] tail;
         try (RandomAccessFile r = new RandomAccessFile(f, "r")) {
@@ -79,8 +72,6 @@ final class Diag {
         }
         try (java.io.FileOutputStream out = new java.io.FileOutputStream(f, false)) { out.write(tail); }
     }
-
-    // ---------------------------------------------------------------- report
 
     static String report(Context c) {
         StringBuilder sb = new StringBuilder(32 * 1024);
@@ -131,7 +122,6 @@ final class Diag {
         }
     }
 
-    /** The launcher's own lines from the system log (an app may always read its own). */
     private static String logcat() {
         StringBuilder out = new StringBuilder();
         try {
@@ -139,7 +129,7 @@ final class Diag {
             try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
                 String l;
                 while ((l = r.readLine()) != null) {
-                    if (l.contains("SurfaceControl") || l.contains("InputMethodManager")) continue; // noise
+                    if (l.contains("SurfaceControl") || l.contains("InputMethodManager")) continue;
                     out.append(l).append('\n');
                 }
             }

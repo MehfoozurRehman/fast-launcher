@@ -16,8 +16,7 @@ import sys
 import time
 
 PKG = "app.fastlauncher"
-VSYNC_MS = 1000 / 90  # the X8b runs its panel at 90 Hz
-
+VSYNC_MS = 1000 / 90
 
 def adb(*args, check=False):
     r = subprocess.run(["adb", *args], capture_output=True, text=True, encoding="utf-8", errors="replace")
@@ -25,19 +24,15 @@ def adb(*args, check=False):
         raise RuntimeError(r.stderr)
     return r.stdout
 
-
 def sh(cmd):
     return adb("shell", cmd)
-
 
 def home():
     sh("input keyevent KEYCODE_HOME")
     time.sleep(0.8)
 
-
 def reset():
     sh(f"dumpsys gfxinfo {PKG} reset")
-
 
 def frames():
     """gfxinfo's summary covers every frame since reset (framestats on this phone keeps only 10)."""
@@ -56,7 +51,6 @@ def frames():
         "slow_draw": num("Number Slow issue draw commands"), "deadline": num("Number Frame deadline missed"),
     }
 
-
 def report(name, r):
     f = r["frames"] or 1
     print(f"{name:14s} frames={r['frames']:4d} janky={100 * r['janky'] / f:5.1f}%  p50={r['p50']:3d} p90={r['p90']:3d} "
@@ -64,13 +58,9 @@ def report(name, r):
           f"slowUI={r['slow_ui']} upload={r['slow_upload']} drawcmd={r['slow_draw']} deadline={r['deadline']}")
     return r
 
-
-# ---------------------------------------------------------------------------- scenarios
-
 def s_idle():
     home(); reset(); time.sleep(10)
     return frames()
-
 
 def s_drawer_flick():
     home(); reset()
@@ -79,7 +69,6 @@ def s_drawer_flick():
         sh("input swipe 540 700 540 1700 110"); time.sleep(0.6)
     return frames()
 
-
 def s_drawer_slow():
     home(); reset()
     for _ in range(3):
@@ -87,14 +76,12 @@ def s_drawer_slow():
         sh("input swipe 540 600 540 1800 1500"); time.sleep(0.8)
     return frames()
 
-
 def s_drawer_scroll():
     home(); sh("input swipe 540 1700 540 600 110"); time.sleep(0.8); reset()
     for _ in range(8):
         sh("input swipe 540 1900 540 400 80"); time.sleep(0.8)
         sh("input swipe 540 500 540 1900 80"); time.sleep(0.8)
     return frames()
-
 
 def s_search():
     home(); sh("input swipe 540 1700 540 600 110"); time.sleep(0.8); reset()
@@ -106,14 +93,12 @@ def s_search():
     sh("input keyevent KEYCODE_BACK"); time.sleep(0.6)
     return frames()
 
-
 def s_menu():
     home(); reset()
     for x in (540, 937, 143):
         sh(f"input swipe {x} 2040 {x} 2040 800"); time.sleep(0.9)
         sh("input keyevent KEYCODE_BACK"); time.sleep(0.6)
     return frames()
-
 
 def s_sheet():
     home(); reset()
@@ -122,14 +107,12 @@ def s_sheet():
         sh("input keyevent KEYCODE_BACK"); time.sleep(0.7)
     return frames()
 
-
 def s_app_return():
     home(); reset()
     for _ in range(4):
         sh("am start -n com.android.settings/.Settings"); time.sleep(1.5)
         sh("input keyevent KEYCODE_HOME"); time.sleep(1.5)
     return frames()
-
 
 def s_browser():
     home(); sh("input swipe 540 1200 540 1200 900"); time.sleep(1.2)
@@ -141,7 +124,6 @@ def s_browser():
         sh("input keyevent KEYCODE_BACK"); time.sleep(0.5)
     return rows
 
-
 def tap_text(text):
     xml = sh("uiautomator dump /sdcard/u.xml >/dev/null 2>&1; cat /sdcard/u.xml")
     m = re.search(r'text="%s"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"' % re.escape(text), xml)
@@ -149,26 +131,22 @@ def tap_text(text):
         x1, y1, x2, y2 = map(int, m.groups())
         sh(f"input tap {(x1 + x2) // 2} {(y1 + y2) // 2}")
 
-
 SCENARIOS = {
     "idle": s_idle, "drawer_flick": s_drawer_flick, "drawer_slow": s_drawer_slow,
     "drawer_scroll": s_drawer_scroll, "search": s_search, "menu": s_menu, "sheet": s_sheet,
     "app_return": s_app_return, "browser": s_browser,
 }
 
-
 def restore_home():
     sh(f"cmd package set-home-activity {PKG}/.MainActivity")
     sh("input keyevent KEYCODE_HOME")
     time.sleep(3)
 
-
 def cold_start():
     """Kill the launcher; Android relaunches home by itself and logs how long the first frame took."""
     times = []
-    # Android switches off a force-stopped app's accessibility service: put the panel's back after
     a11y = sh("settings get secure enabled_accessibility_services").strip()
-    for _ in range(2):  # Honor resets the default home after repeated force-stops
+    for _ in range(2):
         adb("logcat", "-c")
         sh(f"am force-stop {PKG}")
         time.sleep(4)
@@ -182,13 +160,11 @@ def cold_start():
     restore_home()
     print(f"{'cold_start':14s} first frame after a kill: {times} ms (median {statistics.median(times) if times else '-'})")
 
-
 def memory():
     out = sh(f"dumpsys meminfo {PKG}")
     m = re.search(r"TOTAL PSS:\s+(\d+)", out)
     g = re.search(r"Graphics:\s+(\d+)", out)
     print(f"{'memory':16s} PSS={int(m.group(1)) // 1024 if m else '?'} MB  graphics={int(g.group(1)) // 1024 if g else '?'} MB")
-
 
 if __name__ == "__main__":
     restore_home()

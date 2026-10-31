@@ -33,7 +33,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 
-/** The only settings in the launcher: wallpaper. A sheet, a browser and a preview. */
 final class WallpaperUi {
     private WallpaperUi() {}
 
@@ -53,17 +52,16 @@ final class WallpaperUi {
         void runOnUi(Runnable r);
     }
 
-    /** A full-screen layer above the launcher. Back closes the top-most one. */
     abstract static class Overlay extends FrameLayout {
         final Host host;
         boolean closing;
-        /** Kept attached (hidden) between uses, so reopening skips building and measuring. */
+
         boolean reusable;
 
         Overlay(Host h) {
             super(h.context());
             host = h;
-            setClickable(true); // swallow touches that fall through to the launcher
+            setClickable(true);
         }
 
         void open() {
@@ -78,7 +76,6 @@ final class WallpaperUi {
             animateIn();
         }
 
-        /** Attach hidden but measured, ready for an instant first open. */
         void prepare() {
             reusable = true;
             if (getParent() == null) {
@@ -102,8 +99,7 @@ final class WallpaperUi {
         void close() {
             if (closing) return;
             closing = true;
-            // the end of the closing animation finishes the job; if anything cancels that animation
-            // the timed fallback still does, so the launcher can never be left ignoring touches
+
             final boolean[] done = {false};
             final Runnable finish = () -> {
                 if (done[0]) return;
@@ -122,8 +118,6 @@ final class WallpaperUi {
         abstract void animateIn();
         abstract void animateOut(Runnable done);
     }
-
-    // =================================================================== sheet
 
     static final class Sheet extends Overlay {
         private final View backdrop;
@@ -170,7 +164,6 @@ final class WallpaperUi {
             hp.bottomMargin = Ui.dpi(c, 12);
             card.addView(handle, hp);
 
-            // --- the wallpaper itself, large, with its name and the two actions on it
             FrameLayout hero = new FrameLayout(c);
             hero.setBackground(Ui.round(Ui.GROUP, Ui.dp(c, 24)));
             hero.setClipToOutline(true);
@@ -180,7 +173,6 @@ final class WallpaperUi {
             now.setClickable(true);
             now.setOnClickListener(v -> new Browser(host).open());
 
-            // the two actions sit on the picture, bottom right, as plain round buttons
             LinearLayout heroBar = new LinearLayout(c);
             heroBar.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
             heroBar.setPadding(0, 0, Ui.dpi(c, 12), Ui.dpi(c, 12));
@@ -210,7 +202,6 @@ final class WallpaperUi {
             nowSub.setEllipsize(android.text.TextUtils.TruncateAt.END);
             col.addView(nowSub, Ui.lp(-1, -2, Ui.dpi(c, 2)));
 
-            // --- fresh picks: tap one to preview it and set it
             LinearLayout pickHead = new LinearLayout(c);
             pickHead.setGravity(Gravity.CENTER_VERTICAL);
             card.addView(pickHead, Ui.lp(-1, -2, Ui.dpi(c, 18)));
@@ -230,7 +221,7 @@ final class WallpaperUi {
             pickHead.addView(all);
             HorizontalScrollView pickScroll = new HorizontalScrollView(c);
             pickScroll.setHorizontalScrollBarEnabled(false);
-            pickScroll.setOverScrollMode(OVER_SCROLL_IF_CONTENT_SCROLLS); // stretches at the ends
+            pickScroll.setOverScrollMode(OVER_SCROLL_IF_CONTENT_SCROLLS);
             pickScroll.setClipToPadding(false);
             int edge = Ui.dpi(c, 18);
             pickScroll.setPadding(edge, 0, edge, 0);
@@ -243,7 +234,6 @@ final class WallpaperUi {
             for (int i = 0; i < PICKS; i++) picks.addView(pickTile(c, null), pickLp(c, i));
             Thumbs.disk = new java.io.File(c.getCacheDir(), "thumbs");
 
-            // --- change automatically
             LinearLayout autoHead = new LinearLayout(c);
             autoHead.setGravity(Gravity.CENTER_VERTICAL);
             card.addView(autoHead, Ui.lp(-1, -2, Ui.dpi(c, 18)));
@@ -254,7 +244,6 @@ final class WallpaperUi {
             card.addView(seg, Ui.lp(-1, -2, Ui.dpi(c, 8)));
             seg.setListener(i -> { Walls.setInterval(getContext(), i); refreshNext(); });
 
-            // --- a quiet way to send a report from the phone itself (no computer needed)
             TextView report = Ui.text(c, "Something not working?  Report a problem", 12.5f, Ui.FG3, false);
             report.setGravity(Gravity.CENTER);
             report.setPadding(0, Ui.dpi(c, 10), 0, 0);
@@ -267,7 +256,6 @@ final class WallpaperUi {
             refreshNext();
         }
 
-        /** Version, what's switched on and the recent log, as text to send anywhere (WhatsApp, email). */
         private void shareReport() {
             final Context c = getContext();
             host.snack("Preparing the report…");
@@ -286,7 +274,6 @@ final class WallpaperUi {
             });
         }
 
-        /** A one-line setting with a switch. */
         private View glassButton(Context c, Ui.Glyph g, int color) {
             int p = Ui.dpi(c, 13);
             g.setPadding(p, p, p, p);
@@ -313,7 +300,6 @@ final class WallpaperUi {
         static final int PICKS = 8;
         private android.animation.ValueAnimator pulse;
 
-        /** Empty tiles breathe gently while the picks are on their way. */
         private void setLoading(boolean on) {
             if (on) {
                 if (pulse != null) return;
@@ -323,7 +309,7 @@ final class WallpaperUi {
                 pulse.setRepeatCount(android.animation.ValueAnimator.INFINITE);
                 pulse.addUpdateListener(a -> {
                     float v = (Float) a.getAnimatedValue();
-                    // every tile still waiting for its picture breathes; loaded ones stay still
+
                     for (int i = 0; i < picks.getChildCount(); i++) {
                         Ui.RoundImage t = (Ui.RoundImage) picks.getChildAt(i);
                         t.setAlpha(t.bitmap() == null ? v : 1f);
@@ -337,7 +323,6 @@ final class WallpaperUi {
             }
         }
 
-        /** The picks you had last time (kept on the phone); new ones only the first time or on Refresh. */
         private void loadPicks() {
             if (!pickWalls.isEmpty() || picksLoading) return;
             try {
@@ -348,7 +333,6 @@ final class WallpaperUi {
             fetchPicks();
         }
 
-        /** A new handful from the chosen themes; replaces the saved ones. */
         private void fetchPicks() {
             if (picksLoading) return;
             picksLoading = true;
@@ -397,7 +381,7 @@ final class WallpaperUi {
                 final Walls.Wall w = pickWalls.get(i);
                 t.setVisibility(VISIBLE);
                 t.setBitmap(null);
-                t.setPlaceholder(Ui.darken(w.color, 0.75f)); // its colour first, the picture fades in after
+                t.setPlaceholder(Ui.darken(w.color, 0.75f));
                 t.setOnClickListener(v -> new Preview(host, w, pickThumbs.get(w.thumb)).open());
             }
             showPickImages();
@@ -411,7 +395,7 @@ final class WallpaperUi {
                 if (b != null && t.bitmap() != b) t.setBitmap(b);
                 if (t.bitmap() == null) waiting = true;
             }
-            setLoading(waiting); // keep breathing until every picture is in
+            setLoading(waiting);
         }
 
         private Thumbs nowThumbs;
@@ -470,7 +454,7 @@ final class WallpaperUi {
         @Override void animateIn() {
             card.setVisibility(INVISIBLE);
             post(() -> {
-                if (closing) return; // closed before the first frame: don't start the opening
+                if (closing) return;
                 card.setTranslationY(card.getHeight() + Ui.dp(getContext(), 40));
                 card.setVisibility(VISIBLE);
                 card.setLayerType(LAYER_TYPE_HARDWARE, null);
@@ -481,7 +465,6 @@ final class WallpaperUi {
         }
 
         @Override void animateOut(Runnable done) {
-            // GPU-bound after idle: blit one texture instead of redrawing ~40 chips per frame
             card.setLayerType(LAYER_TYPE_HARDWARE, null);
             card.animate().translationY(card.getHeight() + Ui.dp(getContext(), 40)).setDuration(190)
                     .setInterpolator(Ui.STANDARD).withEndAction(done).start();
@@ -495,9 +478,8 @@ final class WallpaperUi {
             backdrop.setAlpha(0f);
         }
 
-        // drag the card down to dismiss
         @Override public boolean onInterceptTouchEvent(MotionEvent e) {
-            if (closing) return true; // on its way out: swallow, don't restart animations
+            if (closing) return true;
             if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 dragStartY = e.getRawY(); dragging = false;
                 if (vt != null) vt.recycle();
@@ -542,8 +524,6 @@ final class WallpaperUi {
         }
     }
 
-    // =================================================================== browser
-
     static final class Browser extends Overlay {
         private ThumbGrid grid;
         private final Thumbs thumbs;
@@ -555,7 +535,7 @@ final class WallpaperUi {
         private final HashMap<String, Integer> pages = new HashMap<>();
         private final HashMap<String, Integer> lastPages = new HashMap<>();
         private final java.util.HashSet<String> seen = new java.util.HashSet<>();
-        private int mode; // 0 = for you, 1 = popular, 2+ = theme index + 2
+        private int mode;
         private int gen;
         private boolean loading, exhausted;
         private int forYouTurn;
@@ -563,13 +543,13 @@ final class WallpaperUi {
         Browser(Host h) {
             super(h);
             Context c = getContext();
-            setBackground(Ui.frost(this, 0)); // the blurred wallpaper, like the sheet and the menus
+            setBackground(Ui.frost(this, 0));
             thumbs = new Thumbs(() -> { if (grid != null) grid.invalidate(); });
 
             LinearLayout top = new LinearLayout(c);
             top.setOrientation(LinearLayout.VERTICAL);
             top.setPadding(0, h.insetTop() + Ui.dpi(c, 6), 0, Ui.dpi(c, 10));
-            top.setBackground(Ui.frost(top, 0)); // lines up with the screen behind, so it reads as one surface
+            top.setBackground(Ui.frost(top, 0));
 
             LinearLayout bar = new LinearLayout(c);
             bar.setGravity(Gravity.CENTER_VERTICAL);
@@ -591,7 +571,7 @@ final class WallpaperUi {
 
             HorizontalScrollView hs = new HorizontalScrollView(c);
             hs.setHorizontalScrollBarEnabled(false);
-            hs.setOverScrollMode(OVER_SCROLL_IF_CONTENT_SCROLLS); // stretches at the ends
+            hs.setOverScrollMode(OVER_SCROLL_IF_CONTENT_SCROLLS);
             LinearLayout chipRow = new LinearLayout(c);
             chipRow.setPadding(Ui.dpi(c, 16), 0, Ui.dpi(c, 16), 0);
             hs.addView(chipRow);
@@ -714,7 +694,6 @@ final class WallpaperUi {
 
         @Override void onClosed() { gen++; thumbs.close(); }
 
-        /** One view, three columns of rounded thumbnails, its own fling + stretch. */
         final class ThumbGrid extends View {
             private final int cols = 3;
             private final float gap, side, radius;
@@ -901,8 +880,6 @@ final class WallpaperUi {
         }
     }
 
-    // =================================================================== preview
-
     static final class Preview extends Overlay {
         private final Walls.Wall wall;
         private final PreviewImage image;
@@ -921,7 +898,6 @@ final class WallpaperUi {
             addView(image, new FrameLayout.LayoutParams(-1, -1));
             image.setOnClickListener(v -> toggleMock());
 
-            // what home will look like
             mock = new FrameLayout(c);
             addView(mock, new FrameLayout.LayoutParams(-1, -1));
             TextView clock = MainActivity.makeClock(c);
@@ -945,7 +921,6 @@ final class WallpaperUi {
             dock.setClickable(false);
             dock.setOnTouchListener((v, ev) -> false);
 
-            // top controls
             LinearLayout bar = new LinearLayout(c);
             bar.setGravity(Gravity.CENTER_VERTICAL);
             bar.setPadding(Ui.dpi(c, 8), h.insetTop() + Ui.dpi(c, 6), Ui.dpi(c, 8), 0);
@@ -958,7 +933,6 @@ final class WallpaperUi {
             bar.addView(eye, Ui.lp(Ui.dpi(c, 44), Ui.dpi(c, 44)));
             addView(bar, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
 
-            // floating action in the empty middle of the home layout
             LinearLayout action = new LinearLayout(c);
             action.setOrientation(LinearLayout.VERTICAL);
             action.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -979,7 +953,7 @@ final class WallpaperUi {
         }
 
         private static Ui.Glyph roundGlyph(Context c, int type) {
-            Ui.Glyph g = new Ui.Glyph(c, type, Color.WHITE); // sits on the wallpaper image
+            Ui.Glyph g = new Ui.Glyph(c, type, Color.WHITE);
             g.setBackground(Ui.round(0x59000000, Ui.dp(c, 22)));
             g.setPadding(Ui.dpi(c, 10), Ui.dpi(c, 10), Ui.dpi(c, 10), Ui.dpi(c, 10));
             g.setClickable(true);
@@ -1043,7 +1017,6 @@ final class WallpaperUi {
                     .setInterpolator(Ui.STANDARD).withEndAction(done).start();
         }
 
-        /** Thumbnail first (instant, soft), then the full image cross-fades in. */
         static final class PreviewImage extends View {
             private final Bitmap thumb;
             private Bitmap full;
@@ -1078,7 +1051,7 @@ final class WallpaperUi {
                     drawCover(c, full, Math.round(255 * t));
                     if (t < 1f) postInvalidateOnAnimation();
                 }
-                // keep the top controls readable on bright images
+
                 if (shade.getShader() == null) {
                     shade.setShader(new LinearGradient(0, 0, 0, getHeight() * 0.18f, 0x66000000, 0x00000000, Shader.TileMode.CLAMP));
                 }
