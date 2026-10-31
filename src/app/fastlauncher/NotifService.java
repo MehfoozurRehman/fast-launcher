@@ -22,7 +22,24 @@ public class NotifService extends NotificationListenerService {
         Diag.install(this);
         running = this;
         HomeGuard.check(this);
+        RefreshRate.apply(this);
+        if (battery == null) {
+            battery = new android.content.BroadcastReceiver() {
+                @Override public void onReceive(android.content.Context c, android.content.Intent i) { RefreshRate.apply(c); }
+            };
+            registerReceiver(battery, new android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED));
+        }
         refresh();
+    }
+
+    private android.content.BroadcastReceiver battery;
+
+    @Override public void onDestroy() {
+        if (battery != null) {
+            try { unregisterReceiver(battery); } catch (Exception ignored) {}
+            battery = null;
+        }
+        super.onDestroy();
     }
 
     @Override public void onNotificationPosted(StatusBarNotification sbn) { refresh(); }

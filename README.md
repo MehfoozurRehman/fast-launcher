@@ -46,6 +46,13 @@ use the 90 Hz name. Moving between package names starts a fresh app, so the dock
 wallpaper settings travel in a small file: `--es debug export` (with the old one running) writes
 `Documents/FastLauncher/settings.json`, and a fresh install imports it once on its first start.
 
+## Saving battery: 90 Hz only while there is battery to spare
+The long-press sheet has a **Screen refresh** choice. With "60 Hz below 50%" (the default) the launcher switches the
+phone's own Screen refresh rate setting (`hw_screen_freq`: 2 = Dynamic, 0 = Standard 60 Hz) to Standard while the
+battery is under 50% and unplugged, and back to Dynamic when it is 50% or more or charging. It only ever undoes
+what it changed itself, so a rate you chose yourself is left alone. It needs the one-time grant
+`adb shell pm grant com.example.android.apis android.permission.WRITE_SECURE_SETTINGS` (`deploy.sh` does it).
+
 ## Build and install
 Needs JDK 17 and the Android SDK (build-tools 36, platform 35). With the phone on USB debugging:
 

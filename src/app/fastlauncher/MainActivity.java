@@ -320,6 +320,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         settleHome();
         NotifService.listener = notifChanged;
         HomeGuard.check(this);
+        RefreshRate.apply(this);
 
         if (NotifService.running == null) {
             String l = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");

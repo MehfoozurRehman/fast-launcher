@@ -244,6 +244,16 @@ final class WallpaperUi {
             card.addView(seg, Ui.lp(-1, -2, Ui.dpi(c, 8)));
             seg.setListener(i -> { Walls.setInterval(getContext(), i); refreshNext(); });
 
+            LinearLayout rateHead = new LinearLayout(c);
+            rateHead.setGravity(Gravity.CENTER_VERTICAL);
+            card.addView(rateHead, Ui.lp(-1, -2, Ui.dpi(c, 18)));
+            rateHead.addView(Ui.label(c, "Screen refresh"), new LinearLayout.LayoutParams(0, -2, 1f));
+            rateHead.addView(Ui.text(c, "Phone-wide, while unplugged", 11.5f, Ui.FG3, false));
+            Ui.Segmented rate = new Ui.Segmented(c, new String[]{"90 Hz always", "60 Hz below " + RefreshRate.LIMIT + "%"},
+                    RefreshRate.saveBattery(c) ? 1 : 0);
+            card.addView(rate, Ui.lp(-1, -2, Ui.dpi(c, 8)));
+            rate.setListener(i -> RefreshRate.setSaveBattery(getContext(), i == 1));
+
             TextView report = Ui.text(c, "Something not working?  Report a problem", 12.5f, Ui.FG3, false);
             report.setGravity(Gravity.CENTER);
             report.setPadding(0, Ui.dpi(c, 10), 0, 0);
