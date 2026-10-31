@@ -18,7 +18,6 @@ import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.widget.EdgeEffect;
-import android.widget.OverScroller;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -65,7 +64,11 @@ final class AppGridView extends View {
     private final Paint footerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint footerText = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-    private final OverScroller scroller;
+    private final boolean scroller;
+    private boolean flinging;
+    private float flingDist, flingDur, flingFrom;
+    private long flingT0;
+    private final float flingCoeff;
     private final EdgeEffect bottomEdge;
     private VelocityTracker vt;
     private final int slop, minFling, maxFling;
@@ -99,13 +102,13 @@ final class AppGridView extends View {
         this.labels = labels;
         this.labelGap = 7 * d;
         if (scrollable) {
-            scroller = new OverScroller(c);
-            scroller.setFriction(ViewConfiguration.getScrollFriction() * 0.7f);
+            scroller = true;
             bottomEdge = new EdgeEffect(c);
         } else {
-            scroller = null;
+            scroller = false;
             bottomEdge = null;
         }
+        flingCoeff = ViewConfiguration.getScrollFriction() * 0.7f * android.hardware.SensorManager.GRAVITY_EARTH * 39.37f * (density * 160f) * 0.84f;
         ViewConfiguration vc = ViewConfiguration.get(c);
         slop = vc.getScaledTouchSlop();
         minFling = vc.getScaledMinimumFlingVelocity();
@@ -155,7 +158,7 @@ final class AppGridView extends View {
         pressedIndex = -1;
         items = list;
         off = 0;
-        if (scroller != null) scroller.forceFinished(true);
+        flinging = false;
         if (labels) {
             float maxW = (getWidth() > 0 ? (getWidth() - 2 * padX) / cols : 200) - 6;
             for (AppEntry e : items) if (e.drawLabel == null) e.drawLabel = fit(e.label, maxW);
@@ -262,14 +265,42 @@ final class AppGridView extends View {
         }
     }
 
+    private static final float FLING_POWER = 2.86f;
+
+    private void startFling(float v) {
+        float av = Math.abs(v);
+        double l = Math.log(0.35f * av / flingCoeff);
+        flingDist = (float) (Math.signum(v) * flingCoeff * Math.exp(2.358 / 1.358 * l));
+        flingDur = (float) (1000.0 * Math.exp(l / 1.358));
+        flingFrom = off;
+        flingT0 = android.view.animation.AnimationUtils.currentAnimationTimeMillis();
+        flinging = true;
+        postInvalidateOnAnimation();
+    }
+
     @Override public void computeScroll() {
-        if (scroller != null && scroller.computeScrollOffset()) {
-            off = scroller.getCurrY();
-            if (off >= maxOff() && maxOff() > 0 && bottomEdge.isFinished()) {
-                bottomEdge.onAbsorb((int) scroller.getCurrVelocity());
-                scroller.forceFinished(true);
+        if (flinging) {
+            float sec = flingDur / 1000f;
+            float t = (android.view.animation.AnimationUtils.currentAnimationTimeMillis() - flingT0) / flingDur;
+            boolean done = t >= 1f;
+            if (done) t = 1f;
+            float left = 1f - t;
+            float next = flingFrom + flingDist * (1f - (float) Math.pow(left, FLING_POWER));
+            float v = Math.abs(flingDist) * FLING_POWER * (float) Math.pow(left, FLING_POWER - 1f) / sec;
+            float max = maxOff();
+            if (flingDist > 0 && next >= max && max > 0) {
+                if (bottomEdge.isFinished()) bottomEdge.onAbsorb((int) v);
+                next = max;
+                done = true;
+            } else if (next <= 0 && flingDist < 0) {
+                next = 0;
+                done = true;
             }
-            off = Math.max(0, Math.min(maxOff(), off));
+            off = Math.max(0, Math.min(max, next));
+            if (done) {
+                flinging = false;
+                off = Math.round(off);
+            }
             postInvalidateOnAnimation();
         }
     }
@@ -377,7 +408,7 @@ final class AppGridView extends View {
         vt.addMovement(ev);
         switch (ev.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                if (scroller != null) scroller.forceFinished(true);
+                flinging = false;
                 downX = ev.getX(); downY = lastY = ev.getY();
                 dragging = false; longFired = false;
                 pressedIndex = hit(downX, downY);
@@ -413,8 +444,9 @@ final class AppGridView extends View {
                     vt.computeCurrentVelocity(1000, maxFling);
                     float v = vt.getYVelocity();
                     if (Math.abs(v) > minFling) {
-                        scroller.fling(0, (int) off, 0, (int) -v, 0, 0, 0, (int) maxOff());
+                        startFling(-v);
                     }
+                    if (!flinging) off = Math.round(off);
                 } else if (!longFired && pressedIndex >= 0 && pressedIndex < items.size() && listener != null
                         && Math.abs(ev.getX() - downX) < slop * 2 && Math.abs(ev.getY() - downY) < slop * 2) {
                     listener.onTap(items.get(pressedIndex), pressedIndex);
