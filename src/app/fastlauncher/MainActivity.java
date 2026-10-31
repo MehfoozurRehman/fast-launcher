@@ -168,6 +168,15 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private final BroadcastReceiver debugReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
             String what = i.getStringExtra("debug");
+            if (what != null && what.startsWith("layer:")) {
+                String[] w = what.split(":");
+                int v = "1".equals(w[2]) ? View.VISIBLE : View.INVISIBLE;
+                if ("blur".equals(w[1])) { blurView.setVisibility(v); blurHidden = v != View.VISIBLE; }
+                else if ("dim".equals(w[1])) { dimView.setVisibility(v); }
+                return;
+            }
+            if ("fps:start".equals(what)) { FrameMeter.start(MainActivity.this); return; }
+            if ("fps:stop".equals(what)) { Diag.log(FrameMeter.stop()); return; }
             if ("export".equals(what)) {
                 final Context app = getApplicationContext();
                 wallWorker.execute(() -> Migrate.export(app));
@@ -288,7 +297,10 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         else root.snapTo(p);
         if (root.progress == 0f) {
             home.setVisibility(View.VISIBLE);
-            home.setAlpha(1f);
+            for (int i = 0; i < home.getChildCount(); i++) {
+                View v = home.getChildAt(i);
+                if (v != topScrim) v.setAlpha(1f);
+            }
             home.setScaleX(1f);
             home.setScaleY(1f);
             home.setTranslationY(0f);
@@ -498,6 +510,8 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     }
 
     private View dimView;
+    private float scrimBase;
+    private boolean blurHidden;
 
     private void buildDrawer() {
         dimView = new View(this);
@@ -716,6 +730,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         float a;
         if (topLuma >= 0f) a = Math.max(0f, Math.min(1f, (topLuma - 0.08f) / 0.25f));
         else a = brightWall ? 1f : 0f;
+        scrimBase = a;
         topScrim.animate().alpha(a).setDuration(400).start();
     }
 
@@ -1452,16 +1467,14 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         private void beginLayers() {
             if (homeLayered) return;
             homeLayered = true;
-            home.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-            drawer.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+
         }
 
         private void endLayers() {
             if (!homeLayered || (anim != null && anim.isRunning())) return;
             if (dragging && hasWindowFocus()) return;
             homeLayered = false;
-            home.setLayerType(View.LAYER_TYPE_NONE, null);
-            drawer.setLayerType(View.LAYER_TYPE_NONE, null);
+
         }
 
         void setProgress(float p) {
@@ -1473,7 +1486,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             if (progress <= 0f) {
                 drawer.setVisibility(View.INVISIBLE);
                 blurView.setVisibility(View.INVISIBLE);
-                home.setAlpha(1f);
+                setHomeFade(1f);
                 if (home.getVisibility() != View.VISIBLE) home.setVisibility(View.VISIBLE);
                 home.setScaleX(1f);
                 home.setScaleY(1f);
@@ -1503,13 +1516,21 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
             float f = span(progress, 0f, 0.42f);
             float ha = 1f - f * f * (3f - 2f * f);
-            home.setAlpha(ha);
+            setHomeFade(ha);
             int hv = ha <= 0f ? View.INVISIBLE : View.VISIBLE;
             if (home.getVisibility() != hv) home.setVisibility(hv);
             home.setScaleX(1f);
             home.setScaleY(1f);
             home.setTranslationY(0f);
             dock.setTranslationY(0f);
+        }
+
+        private void setHomeFade(float a) {
+            for (int i = 0; i < home.getChildCount(); i++) {
+                View v = home.getChildAt(i);
+                if (v == topScrim) v.setAlpha(scrimBase * a);
+                else if (v.getAlpha() != a) v.setAlpha(a);
+            }
         }
 
         private float span(float v, float from, float to) { return Math.max(0f, Math.min(1f, (v - from) / (to - from))); }
