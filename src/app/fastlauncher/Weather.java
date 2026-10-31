@@ -31,6 +31,19 @@ final class Weather {
         long at;
     }
 
+    static String label(int kind, boolean day) {
+        switch (kind) {
+            case CLEAR: return day ? "Sunny" : "Clear";
+            case PARTLY: return "Partly cloudy";
+            case CLOUDY: return "Cloudy";
+            case FOG: return "Fog";
+            case RAIN: return "Rain";
+            case SNOW: return "Snow";
+            case STORM: return "Storm";
+        }
+        return "";
+    }
+
     static SharedPreferences prefs(Context c) { return c.getSharedPreferences("weather", Context.MODE_PRIVATE); }
 
     static boolean hasPermission(Context c) {

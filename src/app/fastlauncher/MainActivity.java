@@ -54,7 +54,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity implements WallpaperUi.Host {
-    static final int CLOCK_TOP_DP = 128, DATE_TOP_DP = 104, CHIP_TOP_DP = 236, DOCK_HEIGHT_DP = 190;
+    static final int CLOCK_TOP_DP = 84, DATE_TOP_DP = 290, CHIP_TOP_DP = 336, SIDE_DP = 30, DOCK_HEIGHT_DP = 190;
     private static final int DOCK_SLOTS = 10;
     private static final String[][] DEFAULT_DOCK = {
             {"com.google.android.apps.maps"}, {"com.wispr.flowapp"}, {"com.facebook.katana"},
@@ -78,7 +78,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private Weather.Glyph weatherGlyph;
     private TextView weatherText;
     private boolean weatherLoading, coverPending;
-    private TextView clock, date, title, snackView;
+    private TextView clock, date, title, snackView, battery;
     private EditText search;
     private Ui.Glyph btnSearch;
     private AppGridView dock, grid;
@@ -366,11 +366,12 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     static TextView makeClock(Context c) {
         TextView t = new TextView(c);
         t.setTextColor(Color.WHITE);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 100);
-        t.setTypeface(Ui.font(c, 520));
-        t.setLetterSpacing(-0.05f);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 112);
+        t.setTypeface(Ui.font(c, 700));
+        t.setLetterSpacing(-0.04f);
         t.setIncludeFontPadding(false);
-        t.setGravity(Gravity.CENTER);
+        t.setLineSpacing(0, 0.67f);
+        t.setGravity(Gravity.START);
         t.setShadowLayer(Ui.dp(c, 10), 0, Ui.dp(c, 2), 0x40000000);
         return t;
     }
@@ -378,11 +379,11 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     static TextView makeDate(Context c) {
         TextView t = new TextView(c);
         t.setTextColor(0xF2FFFFFF);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16.5f);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 17f);
         t.setTypeface(Ui.font(c, 600));
         t.setLetterSpacing(0.01f);
         t.setIncludeFontPadding(false);
-        t.setGravity(Gravity.CENTER);
+        t.setGravity(Gravity.CENTER_VERTICAL);
         t.setShadowLayer(Ui.dp(c, 4), 0, Ui.dp(c, 1), 0x40000000);
         return t;
     }
@@ -403,6 +404,14 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         int h = c.get(Calendar.HOUR);
         if (h == 0) h = 12;
         return h + ":" + String.format(Locale.US, "%02d", c.get(Calendar.MINUTE));
+    }
+
+    static CharSequence stackedTime(Calendar c) {
+        String h = clockText(c);
+        int i = h.indexOf(':');
+        android.text.SpannableString sp = new android.text.SpannableString(h.substring(0, i) + "\n" + h.substring(i + 1));
+        sp.setSpan(new android.text.style.ForegroundColorSpan(0xD9FFFFFF), i + 1, sp.length(), 0);
+        return sp;
     }
 
     static String dateText(Calendar c) {
@@ -434,13 +443,17 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         home.addView(topScrim, new FrameLayout.LayoutParams(-1, dpi(340), Gravity.TOP));
 
         clock = makeClock(this);
-        home.addView(clock, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
+        clp.leftMargin = dpi(SIDE_DP);
+        home.addView(clock, clp);
         clock.setOnClickListener(v -> startSafely(new Intent(AlarmClock.ACTION_SHOW_ALARMS), v));
         Ui.pressable(clock);
 
         dateRow = new LinearLayout(this);
         dateRow.setGravity(Gravity.CENTER_VERTICAL);
-        home.addView(dateRow, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+        FrameLayout.LayoutParams drp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
+        drp.leftMargin = dpi(SIDE_DP);
+        home.addView(dateRow, drp);
         date = makeDate(this);
         dateRow.addView(date);
         date.setOnClickListener(v -> startSafely(
@@ -448,12 +461,14 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         Ui.pressable(date);
 
         chipRow = new LinearLayout(this);
-        chipRow.setGravity(Gravity.CENTER);
-        home.addView(chipRow, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+        chipRow.setGravity(Gravity.CENTER_VERTICAL);
+        FrameLayout.LayoutParams crp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
+        crp.leftMargin = dpi(SIDE_DP);
+        home.addView(chipRow, crp);
 
         weatherChip = new LinearLayout(this);
         weatherChip.setGravity(Gravity.CENTER_VERTICAL);
-        pill(weatherChip, 10, 7, 14, 7);
+        weatherChip.setPadding(dpi(12), dpi(6), dpi(6), dpi(6));
         weatherGlyph = new Weather.Glyph(this);
         weatherChip.addView(weatherGlyph, new LinearLayout.LayoutParams(dpi(20), dpi(20)));
         weatherText = makeDate(this);
@@ -465,9 +480,14 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         weatherChip.setOnClickListener(v -> onWeatherTap(v));
         Ui.pressable(weatherChip);
         weatherChip.setVisibility(View.GONE);
-        LinearLayout.LayoutParams wc = new LinearLayout.LayoutParams(-2, -2);
-        wc.rightMargin = dpi(8);
-        chipRow.addView(weatherChip, wc);
+        dateRow.addView(weatherChip);
+
+        battery = makeChipText(this, 15f, 600);
+        battery.setTextColor(0xE6FFFFFF);
+        pill(battery, 14, 7, 14, 7);
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(-2, -2);
+        bp.rightMargin = dpi(8);
+        chipRow.addView(battery, bp);
 
         agenda = makeChipText(this, 15f, 600);
         pill(agenda, 14, 7, 14, 7);
@@ -500,8 +520,9 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private final Runnable tick = new Runnable() {
         @Override public void run() {
             Calendar c = Calendar.getInstance();
-            clock.setText(clockText(c));
+            clock.setText(stackedTime(c));
             date.setText(dateText(c));
+            refreshBattery();
             if (Weather.stale(MainActivity.this)) refreshWeather();
             refreshAgenda();
             long now = System.currentTimeMillis();
@@ -510,6 +531,14 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     };
 
     private boolean agendaHasEvent;
+
+    private void refreshBattery() {
+        android.content.Intent b = registerReceiver(null, new android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED));
+        if (b == null) return;
+        int level = b.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, 0) * 100 / Math.max(1, b.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100));
+        boolean charging = b.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) != 0;
+        battery.setText(level + "%" + (charging ? "  Charging" : ""));
+    }
 
     private void refreshAgenda() {
         Agenda.load(this, (text, hasEvent) -> {
@@ -683,7 +712,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         Weather.Now n = Weather.cached(this);
         if (n != null) {
             weatherGlyph.set(n.kind, n.day);
-            weatherText.setText(n.tempC + "°C");
+            weatherText.setText(n.tempC + "°C  " + Weather.label(n.kind, n.day));
             weatherChip.setVisibility(View.VISIBLE);
         }
         if (Weather.stale(this)) refreshWeather();
@@ -704,7 +733,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 Weather.Now n = Weather.cached(app);
                 if (n == null) return;
                 weatherGlyph.set(n.kind, n.day);
-                weatherText.setText(n.tempC + "°C");
+                weatherText.setText(n.tempC + "°C  " + Weather.label(n.kind, n.day));
                 if (weatherChip.getVisibility() != View.VISIBLE) {
                     weatherChip.setAlpha(0f);
                     weatherChip.setVisibility(View.VISIBLE);
