@@ -12,8 +12,8 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   below; Enter launches the top hit.
 - **Wallpaper swaps** cross-fade: the launcher shows the new image itself while Android rebinds its
   wallpaper window, hiding the black blink.
-- **Icons**: pebbles. Each app sits on an organic blob plate (white in light mode, near-black in dark mode), with its own artwork set into an
-  echo of that shape. Every app gets a gentle variation seeded from its name. Shadows are baked in.
+- **Icons**: pebbles. Each app's own artwork is cut to an organic blob shape, with no plate, rim or shadow
+  around it: the icon itself is the shape. Every app gets a gentle variation seeded from its name.
   Real adaptive icons are used even on Honor, whose icon theme normally swaps them for pre-shaped bitmaps
   (see `Icons.raw`: adaptive icons are inflated from their XML, bitmap icons decoded from raw PNG bytes).
 - **Long-press an app**: a small solid card with the app's own shortcuts (e.g. recent WhatsApp chats)
