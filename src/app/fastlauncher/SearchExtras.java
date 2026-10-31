@@ -43,7 +43,9 @@ final class SearchExtras extends LinearLayout {
     private String query = "", maths;
     private String shownContacts = "";
 
-    private final View mathsRow, webRow, hiddenRow;
+    private final View mathsRow, webRow, hiddenRow, quickRow;
+    private final TextView quickTitle;
+    private Intent quick;
     private final LinearLayout settingsBox;
     private String shownSettings = "";
     private final TextView mathsTitle, webTitle, hiddenTitle;
@@ -71,6 +73,9 @@ final class SearchExtras extends LinearLayout {
         worker.execute(() -> Setting.all(app));
         addView(settingsBox, new LinearLayout.LayoutParams(-1, -2));
         addView(mathsRow, rowLp());
+        quickRow = row(c, glyph(c, Ui.G_SEARCH), "", null, v -> { if (quick != null) host.start(quick, v); });
+        quickTitle = (TextView) quickRow.getTag();
+        addView(quickRow, rowLp());
         addView(contactBox, new LinearLayout.LayoutParams(-1, -2));
         addView(webRow, rowLp());
         setVisibility(GONE);
@@ -96,6 +101,9 @@ final class SearchExtras extends LinearLayout {
             return;
         }
         maths = Calc.answer(q);
+        if (maths == null) maths = Units.answer(q);
+        quick = quickAction(q);
+        setVis(quickRow, quick != null);
         if (maths != null) mathsTitle.setText("= " + maths);
         setVis(mathsRow, maths != null);
 
@@ -156,6 +164,19 @@ final class SearchExtras extends LinearLayout {
         if (query.isEmpty()) return;
         if (maths != null) { copy(maths); return; }
         web(this);
+    }
+
+    private Intent quickAction(String q) {
+        String digits = q.replaceAll("[^0-9]", "");
+        if (q.matches("\\+?[0-9][0-9 \\-()]{4,}") && digits.length() >= 5) {
+            quickTitle.setText("Call " + q);
+            return new Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(q.replaceAll("[ \\-()]", ""))));
+        }
+        if (q.matches("(?i)(https?://)?[a-z0-9-]+(\\.[a-z0-9-]+)*\\.[a-z]{2,}(/\\S*)?")) {
+            quickTitle.setText("Open " + q);
+            return new Intent(Intent.ACTION_VIEW, Uri.parse(q.matches("(?i)https?://.*") ? q : "https://" + q));
+        }
+        return null;
     }
 
     private void web(View v) {
@@ -335,6 +356,63 @@ final class SearchExtras extends LinearLayout {
             if (p != null && p.moveToFirst()) return p.getString(0);
         } catch (Exception ignored) {}
         return null;
+    }
+
+    static final class Units {
+        private static final java.util.Map<String, Object[]> U = new java.util.HashMap<>();
+
+        private static void add(String cat, double f, String... names) {
+            for (String n : names) U.put(n, new Object[]{cat, f, names[0]});
+        }
+
+        static {
+            add("len", 1, "m", "meter", "meters", "metre", "metres");
+            add("len", 1000, "km", "kilometer", "kilometers", "kilometre", "kilometres");
+            add("len", 0.01, "cm", "centimeter", "centimeters");
+            add("len", 0.001, "mm", "millimeter", "millimeters");
+            add("len", 1609.344, "mi", "mile", "miles");
+            add("len", 0.3048, "ft", "foot", "feet");
+            add("len", 0.0254, "in", "inch", "inches");
+            add("len", 0.9144, "yd", "yard", "yards");
+            add("mass", 1, "kg", "kilo", "kilos", "kilogram", "kilograms");
+            add("mass", 0.001, "g", "gram", "grams");
+            add("mass", 0.45359237, "lb", "lbs", "pound", "pounds");
+            add("mass", 0.028349523, "oz", "ounce", "ounces");
+            add("vol", 1, "l", "liter", "liters", "litre", "litres");
+            add("vol", 0.001, "ml", "milliliter", "milliliters");
+            add("vol", 3.785411784, "gal", "gallon", "gallons");
+            add("vol", 0.2365882365, "cup", "cups");
+            add("spd", 1, "m/s", "mps");
+            add("spd", 0.277777778, "kmh", "km/h", "kph");
+            add("spd", 0.44704, "mph");
+            add("data", 1, "b", "byte", "bytes");
+            add("data", 1024, "kb");
+            add("data", 1048576, "mb");
+            add("data", 1073741824, "gb");
+            add("data", 1099511627776.0, "tb");
+            add("temp", 0, "c", "°c", "celsius");
+            add("temp", 0, "f", "°f", "fahrenheit");
+            add("temp", 0, "k", "kelvin");
+        }
+
+        static String answer(String q) {
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("^(-?[0-9]*\\.?[0-9]+)\\s*([a-z°/]+)\\s+(?:in|to|as|into)\\s+([a-z°/]+)$")
+                    .matcher(q.toLowerCase(Locale.ROOT).trim());
+            if (!m.matches()) return null;
+            Object[] a = U.get(m.group(2)), b = U.get(m.group(3));
+            if (a == null || b == null || !a[0].equals(b[0])) return null;
+            double v = Double.parseDouble(m.group(1)), out;
+            if ("temp".equals(a[0])) {
+                String from = (String) a[2], to = (String) b[2];
+                double k = from.equals("c") || from.equals("°c") ? v + 273.15 : from.equals("f") || from.equals("°f") ? (v - 32) * 5 / 9 + 273.15 : v;
+                out = to.equals("c") || to.equals("°c") ? k - 273.15 : to.equals("f") || to.equals("°f") ? (k - 273.15) * 9 / 5 + 32 : k;
+            } else {
+                out = v * (Double) a[1] / (Double) b[1];
+            }
+            String num = String.format(Locale.US, "%.4f", out).replaceAll("0+$", "").replaceAll("\\.$", "");
+            return num + " " + b[2];
+        }
     }
 
     static final class Calc {

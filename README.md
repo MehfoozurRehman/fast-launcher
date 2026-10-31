@@ -4,13 +4,16 @@ A small, fast Android home screen built with plain Android views (no AndroidX, n
 Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launchers.
 
 ## What it does
-- **Home**: a big, tight clock, the date in small tracked-out capitals under it, and frosted pills below for the
-  current weather from [open-meteo.com](https://open-meteo.com) (tap for the weather app) and the next alarm or
+- **Home**: the date, a big light clock under it, and soft pills below for the current weather and condition
+  from [open-meteo.com](https://open-meteo.com) (tap for the weather app), the battery level, and the next alarm or
   calendar event when one falls within the coming day (tap for alarms / calendar). Two-row dock with notification badges.
+  **Double-tap an empty spot** to lock the screen (see below).
 - **Drawer**: swipe up over a blurred copy of the wallpaper. It follows your finger and the rows cascade in,
   so a slow drag shows the transition and a flick finishes fast. It can be caught mid-animation.
-  Search finds apps, contacts, settings screens ("wifi", "battery") and sums (`12*8+4`), with a web search
-  below; Enter launches the top hit.
+  Search finds apps (prefix, word start, initials like `ym`, letters in order, one typo, and apps you open
+  most rank higher), contacts, settings screens ("wifi", "battery"), sums (`12*8+4`), unit conversions
+  (`5 km in miles`, `20 c to f`), typed phone numbers (Call) and websites (Open), with a web search below;
+  Enter launches the top hit.
 - **Wallpaper swaps** cross-fade: the launcher shows the new image itself while Android rebinds its
   wallpaper window, hiding the black blink.
 - **Icons**: pebbles. Each app's own artwork is cut to an organic blob shape, with no plate, rim or shadow
@@ -35,6 +38,16 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   - **Browse**: grid by theme or Popular, endless scrolling, preview with your real clock and dock on top.
   - **Change automatically**: off, daily, every 2 or 3 days, from the themes you pick. Runs as a periodic
     job and is also checked whenever you return home, since OEM battery managers delay jobs.
+
+## Double-tap to lock
+Locking uses a device-admin policy that can only lock the screen (`res/xml/device_admin.xml`, `LockAdmin`).
+`deploy.sh` activates it over adb (`dpm set-active-admin`); otherwise the first double-tap opens the system
+screen to turn it on. It is the only way to lock without an accessibility service.
+
+## Measuring frame rate
+`adb shell am broadcast -a app.fastlauncher.DEBUG -p <package> --es debug fps:start` starts recording the real
+frame times of the launcher window (`FrameMeter`), `fps:stop` writes the summary to the log (`FRAMES: ...`:
+delivered fps, share of frames on pace, p50/p90/p99, UI / render / GPU split and the worst frames).
 
 ## Why the package is called `com.example.android.apis`
 Honor's display policy pins apps it doesn't recognise to a fixed 60 Hz, and gives the packages it lists a

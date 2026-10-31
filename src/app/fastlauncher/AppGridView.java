@@ -200,7 +200,6 @@ final class AppGridView extends View {
         return s.substring(0, Math.max(1, n)).trim() + "…";
     }
 
-    static boolean debugNoCells;
     private boolean needCells, buildingCells;
     private static final java.util.concurrent.ExecutorService cellWorker = java.util.concurrent.Executors.newSingleThreadExecutor();
 
@@ -350,7 +349,7 @@ final class AppGridView extends View {
                 if (b != null && !e.blank) {
                     float pad = (b.getWidth() - iconSize) / 2f;
                     Bitmap cell = e.cell;
-                    if (labels && !debugNoCells && cell != null && e.cellFor == b) {
+                    if (labels && cell != null && e.cellFor == b) {
                         canvas.drawBitmap(cell, cx - cell.getWidth() / 2f, top - pad, iconPaint);
                         cellDrawn = true;
                     } else {

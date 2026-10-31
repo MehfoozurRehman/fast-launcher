@@ -168,14 +168,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     private final BroadcastReceiver debugReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context c, Intent i) {
             String what = i.getStringExtra("debug");
-            if (what != null && what.startsWith("layer:")) {
-                String[] w = what.split(":");
-                int v = "1".equals(w[2]) ? View.VISIBLE : View.INVISIBLE;
-                if ("blur".equals(w[1])) { blurView.setVisibility(v); blurHidden = v != View.VISIBLE; }
-                else if ("dim".equals(w[1])) { dimView.setVisibility(v); }
-                return;
-            }
-            if (what != null && what.startsWith("cells:")) { AppGridView.debugNoCells = what.endsWith(":0"); grid.invalidate(); return; }
             if ("fps:start".equals(what)) { FrameMeter.start(MainActivity.this); return; }
             if ("fps:stop".equals(what)) { Diag.log(FrameMeter.stop()); return; }
             if ("export".equals(what)) {
@@ -363,8 +355,18 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         super.onPause();
     }
 
+    static final class FlatText extends TextView {
+        FlatText(Context c) { super(c); }
+        @Override public boolean hasOverlappingRendering() { return false; }
+    }
+
+    static final class FlatRow extends LinearLayout {
+        FlatRow(Context c) { super(c); }
+        @Override public boolean hasOverlappingRendering() { return false; }
+    }
+
     static TextView makeClock(Context c) {
-        TextView t = new TextView(c);
+        TextView t = new FlatText(c);
         t.setTextColor(Color.WHITE);
         t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 100);
         t.setTypeface(Ui.font(c, 520));
@@ -376,7 +378,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     }
 
     static TextView makeDate(Context c) {
-        TextView t = new TextView(c);
+        TextView t = new FlatText(c);
         t.setTextColor(0xF2FFFFFF);
         t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16.5f);
         t.setTypeface(Ui.font(c, 600));
@@ -388,7 +390,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     }
 
     static TextView makeChipText(Context c, float sp, int weight) {
-        TextView t = new TextView(c);
+        TextView t = new FlatText(c);
         t.setTextColor(Color.WHITE);
         t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, sp);
         t.setTypeface(Ui.font(c, weight));
@@ -438,7 +440,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         clock.setOnClickListener(v -> startSafely(new Intent(AlarmClock.ACTION_SHOW_ALARMS), v));
         Ui.pressable(clock);
 
-        dateRow = new LinearLayout(this);
+        dateRow = new FlatRow(this);
         dateRow.setGravity(Gravity.CENTER_VERTICAL);
         home.addView(dateRow, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
         date = makeDate(this);
@@ -447,15 +449,15 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALENDAR), v));
         Ui.pressable(date);
 
-        chipRow = new LinearLayout(this);
+        chipRow = new FlatRow(this);
         chipRow.setOrientation(LinearLayout.VERTICAL);
         chipRow.setGravity(Gravity.CENTER_HORIZONTAL);
         home.addView(chipRow, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
-        LinearLayout pillRow = new LinearLayout(this);
+        LinearLayout pillRow = new FlatRow(this);
         pillRow.setGravity(Gravity.CENTER);
         chipRow.addView(pillRow, new LinearLayout.LayoutParams(-2, -2));
 
-        weatherChip = new LinearLayout(this);
+        weatherChip = new FlatRow(this);
         weatherChip.setGravity(Gravity.CENTER_VERTICAL);
         pill(weatherChip, 10, 7, 14, 7);
         weatherGlyph = new Weather.Glyph(this);
@@ -545,7 +547,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
     private View dimView;
     private float scrimBase;
-    private boolean blurHidden;
 
     private void buildDrawer() {
         dimView = new View(this);
@@ -782,6 +783,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         final Context app = getApplicationContext();
         wallWorker.execute(() -> {
             final Walls.Blur b = Walls.loadBlur(app);
+            if (b != null) b.bitmap.prepareToDraw();
             main.post(() -> {
                 if (isDestroyed()) return;
                 blurView.setBitmap(b == null ? null : b.bitmap);
@@ -942,10 +944,28 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             opts = ActivityOptions.makeScaleUpAnimation(from, Math.round(c[0] - s / 2f), Math.round(c[1] - s / 2f), s, s).toBundle();
         }
         try { startActivity(i, opts); } catch (Exception ex) { snack("Couldn't open " + e.label); return; }
+        SharedPreferences up = getSharedPreferences("usage", MODE_PRIVATE);
+        String uk = e.cn.flattenToShortString();
+        up.edit().putInt(uk, up.getInt(uk, 0) + 1).apply();
         if (root.progress > 0f) {
             if (searching) endSearch();
             root.postDelayed(() -> root.snapTo(0f), 350);
         }
+    }
+
+    private void lockScreen() {
+        android.app.admin.DevicePolicyManager dpm = (android.app.admin.DevicePolicyManager) getSystemService(DEVICE_POLICY_SERVICE);
+        ComponentName admin = new ComponentName(this, LockAdmin.class);
+        if (dpm.isAdminActive(admin)) {
+            root.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK);
+            dpm.lockNow();
+            return;
+        }
+        Intent i = new Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+                .putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
+                .putExtra(android.app.admin.DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                        "Lets Fast Launcher lock the screen when you double-tap the home screen. It can't see or change anything else.");
+        try { startActivity(i); } catch (Exception e) { snack("Couldn't open the lock permission screen"); }
     }
 
     private void startSafely(Intent i, View from) {
@@ -1245,16 +1265,60 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         q = q.trim().toLowerCase(Locale.getDefault());
         if (q.isEmpty()) { shown = drawerApps; grid.setItems(drawerApps); return; }
 
-        List<AppGridView.AppEntry> starts = new ArrayList<>(), contains = new ArrayList<>();
+        SharedPreferences up = getSharedPreferences("usage", MODE_PRIVATE);
+        final java.util.Map<AppGridView.AppEntry, Integer> scores = new java.util.HashMap<>();
+        List<AppGridView.AppEntry> found = new ArrayList<>();
         for (AppGridView.AppEntry e : all) {
-            if (e.lower.startsWith(q) || e.lower.contains(" " + q)) starts.add(e);
-            else if (e.lower.contains(q)) contains.add(e);
-
-            else if (q.length() >= 3 && e.cn.getPackageName().contains(q)) contains.add(e);
+            int s = matchScore(e, q);
+            if (s <= 0) continue;
+            scores.put(e, s * 100 + Math.min(60, up.getInt(e.cn.flattenToShortString(), 0) * 4));
+            found.add(e);
         }
-        starts.addAll(contains);
-        shown = starts;
-        grid.setItems(starts);
+        java.util.Collections.sort(found, (a, b) -> scores.get(b) - scores.get(a));
+        shown = found;
+        grid.setItems(found);
+    }
+
+    private static int matchScore(AppGridView.AppEntry e, String q) {
+        String n = e.lower;
+        if (n.startsWith(q)) return 10;
+        if (n.contains(" " + q)) return 9;
+        if (q.length() >= 2) {
+            StringBuilder ini = new StringBuilder();
+            for (String w : n.split("[^a-z0-9\\p{L}]+")) if (!w.isEmpty()) ini.append(w.charAt(0));
+            if (ini.toString().startsWith(q)) return 8;
+        }
+        if (n.contains(q)) return 7;
+        if (q.length() >= 3 && e.cn.getPackageName().contains(q)) return 5;
+        if (q.length() >= 3 && isSubsequence(q, n)) return 4;
+        if (q.length() >= 4) {
+            for (String w : (n + " " + n.replace(" ", "")).split(" ")) {
+                for (int len = q.length() - 1; len <= q.length() + 1; len++) {
+                    if (len > 0 && w.length() >= len && withinOne(q, w.substring(0, len))) return 3;
+                }
+            }
+        }
+        return 0;
+    }
+
+    private static boolean isSubsequence(String q, String n) {
+        int i = 0;
+        for (int k = 0; k < n.length() && i < q.length(); k++) if (n.charAt(k) == q.charAt(i)) i++;
+        return i == q.length();
+    }
+
+    private static boolean withinOne(String a, String b) {
+        if (Math.abs(a.length() - b.length()) > 1) return false;
+        int i = 0, j = 0, edits = 0;
+        while (i < a.length() && j < b.length()) {
+            if (a.charAt(i) == b.charAt(j)) { i++; j++; continue; }
+            if (++edits > 1) return false;
+            if (a.length() > b.length()) i++;
+            else if (a.length() < b.length()) j++;
+            else if (i + 1 < a.length() && j + 1 < b.length() && a.charAt(i) == b.charAt(j + 1) && a.charAt(i + 1) == b.charAt(j)) { i += 2; j += 2; }
+            else { i++; j++; }
+        }
+        return edits + (a.length() - i) + (b.length() - j) <= 1;
     }
 
     private final Runnable hideSnackLater = this::hideSnack;
@@ -1483,7 +1547,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     final class Root extends FrameLayout {
         float progress;
         private float downX, downY, startProgress;
-        private boolean dragging, homeLayered, barsDark = true, shadeFired;
+        private boolean dragging, barsDark = true, shadeFired;
 
         private VelocityTracker vt;
         private ValueAnimator anim;
@@ -1497,19 +1561,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         Root(Context c) { super(c); }
 
         private float travel() { return Math.max(1, getHeight()); }
-
-        private void beginLayers() {
-            if (homeLayered) return;
-            homeLayered = true;
-
-        }
-
-        private void endLayers() {
-            if (!homeLayered || (anim != null && anim.isRunning())) return;
-            if (dragging && hasWindowFocus()) return;
-            homeLayered = false;
-
-        }
 
         void setProgress(float p) {
             progress = Math.max(0f, Math.min(1f, p));
@@ -1599,7 +1650,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             if (anim != null) anim.cancel();
             setOver(0f);
             setProgress(p);
-            endLayers();
         }
 
         void animateTo(float target) { animateTo(target, 0f); }
@@ -1609,7 +1659,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             releaseOver();
             if (target == 0f && searching) endSearch();
             float dist = Math.abs(target - progress);
-            if (dist < 0.002f) { setProgress(target); endLayers(); return; }
+            if (dist < 0.002f) { setProgress(target); return; }
             long dur = Math.round(130 + 170 * dist);
             android.animation.TimeInterpolator curve = Ui.EMPHASIZED;
             if (velocity > 200f) {
@@ -1617,15 +1667,26 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 dur = Math.max(120, Math.min(420, Math.round(2f * px / velocity * 1000f)));
                 curve = new android.view.animation.DecelerateInterpolator(1f);
             }
-            beginLayers();
             anim = ValueAnimator.ofFloat(progress, target);
             anim.setDuration(dur);
             anim.setInterpolator(curve);
             anim.addUpdateListener(a -> setProgress((Float) a.getAnimatedValue()));
-            anim.addListener(new AnimatorListenerAdapter() {
-                @Override public void onAnimationEnd(Animator a) { post(Root.this::endLayers); }
-            });
             anim.start();
+        }
+
+        private long lastTap;
+        private float lastTapX, lastTapY;
+
+        private void registerTap(MotionEvent ev) {
+            long t = ev.getEventTime();
+            if (t - lastTap < 320 && Math.abs(ev.getX() - lastTapX) < dpi(80) && Math.abs(ev.getY() - lastTapY) < dpi(80)) {
+                lastTap = 0;
+                lockScreen();
+            } else {
+                lastTap = t;
+                lastTapX = ev.getX();
+                lastTapY = ev.getY();
+            }
         }
 
         private boolean animating() { return anim != null && anim.isRunning(); }
@@ -1645,7 +1706,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                         anim.cancel();
                         startProgress = progress;
                         dragging = true;
-                        beginLayers();
                         return true;
                     }
                     startProgress = progress;
@@ -1679,7 +1739,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
                     downY = ev.getY() - Math.signum(dy) * slop * 0.5f;
                     startProgress = progress;
-                    beginLayers();
                     return true;
                 }
             }
@@ -1698,7 +1757,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 case MotionEvent.ACTION_DOWN:
                     downX = ev.getX(); downY = ev.getY(); startProgress = progress;
                     shadeFired = false;
-                    if (animating()) { anim.cancel(); dragging = true; beginLayers(); return true; }
+                    if (animating()) { anim.cancel(); dragging = true; return true; }
                     if (placing != null) { cancelPlacing(); return true; }
                     if (progress == 0f) postDelayed(homeLongPress, ViewConfiguration.getLongPressTimeout() + 80);
                     return true;
@@ -1727,6 +1786,10 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                         animateTo(target, target == 1f ? -vy : vy);
                     } else if (progress > 0f && progress < 1f) {
                         animateTo(progress > 0.5f ? 1f : 0f);
+                    } else if (ev.getActionMasked() == MotionEvent.ACTION_UP && progress == 0f && !shadeFired && placing == null
+                            && ev.getEventTime() - ev.getDownTime() < 250
+                            && Math.abs(ev.getX() - downX) < slop * 2 && Math.abs(ev.getY() - downY) < slop * 2) {
+                        registerTap(ev);
                     }
                     dragging = false;
                     if (vt != null) { vt.recycle(); vt = null; }
