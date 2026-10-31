@@ -33,7 +33,8 @@ import java.util.Set;
 final class Icons {
 
     /** Bump when the look changes so cached PNGs are re-rendered. */
-    private static final int VERSION = 9;
+    private static final int VERSION = 10;
+    private static final float SHAPE = 0.88f; // the blob's size relative to the icon cell
 
     private Icons() {}
 
@@ -201,7 +202,7 @@ final class Icons {
         float density = c.getResources().getDisplayMetrics().density;
         int pad = pad(c);
         int full = size + pad * 2;
-        float cx = full / 2f, cy = full / 2f, r = size / 2f - density * 0.5f;
+        float cx = full / 2f, cy = full / 2f, r = size / 2f * SHAPE - density * 0.5f;
         long seed = (ai.packageName + "/" + ai.name).hashCode();
 
         // the artwork at the full size of the shape, then cut to the blob: nothing around it
