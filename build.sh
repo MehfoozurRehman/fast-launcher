@@ -4,7 +4,7 @@ cd "$(dirname "$0")"
 SDK="/c/Users/Mehfo/AppData/Local/Android/Sdk"
 BT="$SDK/build-tools/36.0.0"
 JAR="$SDK/platforms/android-35/android.jar"
-APP_ID="${APP_ID:-app.fastlauncher}"
+APP_ID="${APP_ID:-com.example.android.apis}"
 RENAME=""
 [ "$APP_ID" != "app.fastlauncher" ] && RENAME="--rename-manifest-package $APP_ID"
 rm -rf build && mkdir -p build/classes build/dex

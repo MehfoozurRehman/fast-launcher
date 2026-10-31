@@ -1,5 +1,5 @@
 #!/bin/bash
-APP_ID="${APP_ID:-app.fastlauncher}"
+APP_ID="${APP_ID:-com.example.android.apis}"
 export APP_ID
 cd "$(dirname "$0")" && ./build.sh && adb install -r build/launcher.apk \
   && adb shell cmd package compile -m speed -f "$APP_ID" \

@@ -36,6 +36,16 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   - **Change automatically**: off, daily, every 2 or 3 days, from the themes you pick. Runs as a periodic
     job and is also checked whenever you return home, since OEM battery managers delay jobs.
 
+## Why the package is called `com.example.android.apis`
+Honor's display policy pins apps it doesn't recognise to a fixed 60 Hz, and gives the packages it lists a
+90 Hz plan (the list is `/product_h/region_comm/oversea/xml/agp_config.xml` on the phone). The launcher is
+therefore installed under a name that list contains, which makes the screen run at a locked 90 Hz while it
+is showing. The code is unchanged: `build.sh` renames only the installed package (`APP_ID=<name> ./deploy.sh`
+installs under another name; `APP_ID=app.fastlauncher` gives the original 60 Hz one). The adb commands below
+use the 90 Hz name. Moving between package names starts a fresh app, so the dock, hidden apps, look and
+wallpaper settings travel in a small file: `--es debug export` (with the old one running) writes
+`Documents/FastLauncher/settings.json`, and a fresh install imports it once on its first start.
+
 ## Build and install
 Needs JDK 17 and the Android SDK (build-tools 36, platform 35). With the phone on USB debugging:
 
@@ -51,15 +61,15 @@ otherwise Android requires an uninstall (which loses the dock, hidden apps and n
 One-time grants over adb (they survive restarts and updates). Run each once after a fresh install:
 
 ```bash
-adb shell pm grant app.fastlauncher android.permission.POST_NOTIFICATIONS
+adb shell pm grant com.example.android.apis android.permission.POST_NOTIFICATIONS
 ```
 
 ```bash
-adb shell appops set app.fastlauncher MANAGE_EXTERNAL_STORAGE allow
+adb shell appops set com.example.android.apis MANAGE_EXTERNAL_STORAGE allow
 ```
 
 ```bash
-adb shell dumpsys deviceidle whitelist +app.fastlauncher
+adb shell dumpsys deviceidle whitelist +com.example.android.apis
 ```
 
 In order: the one reminder the launcher leaves if it ever stops being the home app; reading the current
@@ -76,11 +86,11 @@ checklist shows any that are missing.
 - With the phone connected, the same report as a file:
 
 ```bash
-adb shell am broadcast -a app.fastlauncher.DEBUG --es debug report -p app.fastlauncher
+adb shell am broadcast -a app.fastlauncher.DEBUG --es debug report -p com.example.android.apis
 ```
 
 ```bash
-adb shell cat /sdcard/Android/data/app.fastlauncher/files/report.txt
+adb shell cat /sdcard/Android/data/com.example.android.apis/files/report.txt
 ```
 
 - If Honor's launcher ever takes over as home, the launcher leaves a notification, "Fast Launcher isn't your

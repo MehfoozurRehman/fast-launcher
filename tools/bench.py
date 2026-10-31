@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 
-PKG = "app.fastlauncher"
+PKG = "com.example.android.apis"
 VSYNC_MS = 1000 / 90
 
 def adb(*args, check=False):
