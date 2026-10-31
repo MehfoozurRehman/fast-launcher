@@ -33,8 +33,8 @@ import java.util.Set;
 final class Icons {
 
     /** Bump when the look changes so cached PNGs are re-rendered. */
-    private static final int VERSION = 10;
-    private static final float SHAPE = 0.88f; // the blob's size relative to the icon cell
+    private static final int VERSION = 11;
+    private static final float SHAPE = 0.78f; // the blob's size relative to the icon cell
 
     private Icons() {}
 
