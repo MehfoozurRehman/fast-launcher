@@ -4,8 +4,9 @@ A small, fast Android home screen built with plain Android views (no AndroidX, n
 Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launchers.
 
 ## What it does
-- **Home**: big clock, date and current weather from [open-meteo.com](https://open-meteo.com) (tap for
-  alarms / calendar / weather app), two-row dock with notification badges.
+- **Home**: a big, tight clock, the date in small tracked-out capitals under it, and frosted pills below for the
+  current weather from [open-meteo.com](https://open-meteo.com) (tap for the weather app) and the next alarm or
+  calendar event when one falls within the coming day (tap for alarms / calendar). Two-row dock with notification badges.
 - **Drawer**: swipe up over a blurred copy of the wallpaper. It follows your finger and the rows cascade in,
   so a slow drag shows the transition and a flick finishes fast. It can be caught mid-animation.
   Search finds apps, contacts, settings screens ("wifi", "battery") and sums (`12*8+4`), with a web search
@@ -22,7 +23,6 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   stay out of the drawer but still come up in search; type “hidden” to list them.
   Single-colour shortcut icons (Facebook's, for example) are tinted so they show on the dark card.
 - **Swipe down on home** opens the phone's own notification shade.
-- **Under the date**: the next alarm and calendar event when they fall within the coming day.
 - **Look**: menus, the wallpaper sheet, the Wallpapers screen and messages are frosted glass over the blurred wallpaper (no plain grey). Everything follows light and dark mode.
 - **Type**: clock, date and headings use Montserrat (bundled, SIL Open Font License, see `assets/fonts/OFL.txt`).
 - **Long-press home**: wallpaper panel, the launcher's only settings: your wallpaper large with New one
