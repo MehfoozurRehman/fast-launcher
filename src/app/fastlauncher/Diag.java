@@ -27,10 +27,7 @@ import java.util.Locale;
 /**
  * Keeps the launcher healthy and reportable without a computer attached:
  *  - a small on-phone log of crashes and warnings (last ~64 KB),
- *  - a plain-text report (version, what's switched on, recent log) to share from the phone,
- *  - self-repair: Android switches off the panel's accessibility service whenever the app is
- *    force-stopped (phone cleaners do this); with WRITE_SECURE_SETTINGS (granted once over adb)
- *    the launcher puts it back.
+ *  - a plain-text report (version, what's switched on, recent log) to share from the phone.
  */
 final class Diag {
     private Diag() {}
@@ -83,28 +80,6 @@ final class Diag {
         try (java.io.FileOutputStream out = new java.io.FileOutputStream(f, false)) { out.write(tail); }
     }
 
-    // ---------------------------------------------------------------- self-repair
-
-    static final ComponentName PANEL = new ComponentName("app.fastlauncher", "app.fastlauncher.PanelService");
-
-    /** Switch the panel's service back on if Android turned it off (only possible with the adb grant). */
-    static void repair(Context c) {
-        try {
-            if (c.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) != PackageManager.PERMISSION_GRANTED) return;
-            // switched off by the user in Settings (not by a force-stop): leave it off
-            if (c.getSharedPreferences("panel", Context.MODE_PRIVATE).getBoolean("userOff", false)) return;
-            String list = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-            String me = PANEL.flattenToString();
-            if (list != null && (list.contains(me) || list.contains(PANEL.flattenToShortString()))) return;
-            String next = list == null || list.isEmpty() ? me : list + ":" + me;
-            Settings.Secure.putString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, next);
-            Settings.Secure.putInt(c.getContentResolver(), Settings.Secure.ACCESSIBILITY_ENABLED, 1);
-            log("panel service had been switched off; switched it back on");
-        } catch (Exception e) {
-            log("repair: " + e);
-        }
-    }
-
     // ---------------------------------------------------------------- report
 
     static String report(Context c) {
@@ -119,20 +94,11 @@ final class Diag {
 
         sb.append("Status\n");
         line(sb, "default home app", isHome(c));
-        line(sb, "panel service running", PanelService.running != null);
-        String a11y = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-        line(sb, "panel service switched on", a11y != null && a11y.contains("app.fastlauncher"));
-        line(sb, "notification access", NotifService.running != null);
-        try {
-            line(sb, "do-not-disturb access", ((NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE)).isNotificationPolicyAccessGranted());
-        } catch (Exception ignored) {}
-        line(sb, "modify system settings", Settings.System.canWrite(c));
+        line(sb, "notification access (badges)", NotifService.running != null);
         line(sb, "calendar", granted(c, Manifest.permission.READ_CALENDAR));
         line(sb, "contacts", granted(c, Manifest.permission.READ_CONTACTS));
-        line(sb, "nearby devices (Bluetooth)", granted(c, Manifest.permission.BLUETOOTH_CONNECT));
         line(sb, "location (weather)", granted(c, Manifest.permission.ACCESS_COARSE_LOCATION));
-        line(sb, "self-repair allowed", granted(c, Manifest.permission.WRITE_SECURE_SETTINGS));
-        line(sb, "notifications (recorder's Stop)", granted(c, Manifest.permission.POST_NOTIFICATIONS));
+        line(sb, "notifications (home-screen reminder)", granted(c, Manifest.permission.POST_NOTIFICATIONS));
         line(sb, "can read any wallpaper (blur)", Build.VERSION.SDK_INT < 30 || android.os.Environment.isExternalStorageManager());
         try {
             line(sb, "not battery-restricted", ((PowerManager) c.getSystemService(Context.POWER_SERVICE)).isIgnoringBatteryOptimizations(c.getPackageName()));

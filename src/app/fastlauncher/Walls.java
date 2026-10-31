@@ -206,35 +206,6 @@ final class Walls {
         schedule(c);
     }
 
-    static boolean lockToo(Context c) { return LockScreen.style(c) != LockScreen.OFF; }
-
-    /** The lock screen's wallpaper in its chosen style, from a home wallpaper bitmap. */
-    static void setLock(Context c, Bitmap home, int style) {
-        if (style == LockScreen.OFF || home == null) return;
-        try {
-            Bitmap v = LockScreen.variant(home, style);
-            WallpaperManager.getInstance(c).setBitmap(v, null, true, WallpaperManager.FLAG_LOCK);
-            if (v != home) v.recycle();
-        } catch (Exception e) {
-            Diag.log("lock wallpaper: " + e);
-        }
-    }
-
-    /** The style was changed in the sheet: redo the lock screen from the wallpaper that's on now. */
-    static void reapplyLock(Context c) {
-        int style = LockScreen.style(c);
-        if (style == LockScreen.OFF) return;
-        Bitmap home = systemWallpaper(c);
-        if (home == null) {
-            Wall cur = current(c);
-            try { if (cur != null) home = download(c, cur); } catch (Exception ignored) {}
-        }
-        if (home == null) return;
-        setLock(c, home, style);
-        home.recycle();
-        try { WallpaperManager.getInstance(c).forgetLoadedWallpaper(); } catch (Exception ignored) {}
-    }
-
     static Wall current(Context c) {
         String s = prefs(c).getString("current", null);
         if (s == null) return null;
@@ -372,8 +343,6 @@ final class Walls {
     static void apply(Context c, Wall w, Bitmap ready) throws Exception {
         Bitmap b = ready != null ? ready : download(c, w);
         WallpaperManager wm = WallpaperManager.getInstance(c);
-        int lock = LockScreen.style(c);
-        int which = WallpaperManager.FLAG_SYSTEM | (lock == LockScreen.SAME ? WallpaperManager.FLAG_LOCK : 0);
         Cover cv = cover;
         if (cv != null) {
             java.util.concurrent.CountDownLatch shown = new java.util.concurrent.CountDownLatch(1);
@@ -381,11 +350,10 @@ final class Walls {
             try { shown.await(700, java.util.concurrent.TimeUnit.MILLISECONDS); } catch (InterruptedException ignored) {}
         }
         try {
-            wm.setBitmap(b, null, true, which);
+            wm.setBitmap(b, null, true, WallpaperManager.FLAG_SYSTEM);
         } finally {
             if (cv != null) cv.settle();
         }
-        if (lock == LockScreen.DIMMED || lock == LockScreen.BLURRED) setLock(c, b, lock);
         prefs(c).edit().putString("current", w.toJson().toString())
                 .putLong("lastChange", System.currentTimeMillis()).apply();
         addId(c, "history", w.id, 150);

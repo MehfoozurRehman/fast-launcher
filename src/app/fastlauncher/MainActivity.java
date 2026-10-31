@@ -114,6 +114,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
         Diag.install(this);
+        if (HomeGuard.ACTION_SET_HOME.equals(getIntent().getAction())) HomeGuard.request(this, 77);
         Ui.theme(this);
         builtDark = Ui.dark;
         builtAccent = Ui.ACCENT;
@@ -184,7 +185,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 });
                 return;
             }
-            if ("testnotif".equals(what)) { postTestNotification(); return; }
             if (what != null && what.startsWith("seed:")) { // adb: preview an accent from any colour
                 seedPreview = true;
                 if (Ui.setSeed(MainActivity.this, Ui.seedFrom(new int[]{(int) Long.parseLong(what.substring(5), 16) | 0xFF000000}))) recreate();
@@ -196,16 +196,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 catch (Exception ignored) {}
                 return;
             }
-            if ("tiles".equals(what)) { PanelService.dumpSystemTiles(); return; }
-            if (what != null && what.startsWith("wifi:")) { // adb test: connect via settings
-                PanelService.pressInSettings(new Intent(Settings.ACTION_WIFI_SETTINGS), what.substring(5),
-                        r -> Diag.log("wifi connect result " + r));
-                return;
-            }
-            if (what != null && what.startsWith("tile:")) {
-                PanelService.pressSystemTile(what.substring(5), ok -> Diag.log("tile result " + ok));
-                return;
-            }
             if ("gc".equals(what)) { // leak checks: count only what's really still referenced
                 for (int k = 0; k < 3; k++) { Runtime.getRuntime().gc(); System.runFinalization(); }
                 return;
@@ -214,54 +204,10 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         }
     };
 
-    /**
-     * adb-only test: a notification with Reply and Mark as read buttons, to check the panel's
-     * notification actions end to end. The reply lands in the launcher log ("test reply: ...").
-     */
-    private void postTestNotification() {
-        android.app.NotificationManager nm = (android.app.NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        nm.createNotificationChannel(new android.app.NotificationChannel(NotifService.TEST_CHANNEL, "Tests",
-                android.app.NotificationManager.IMPORTANCE_LOW));
-        String act = getPackageName() + ".TEST_REPLY";
-        if (!testReceiverOn) {
-            testReceiverOn = true;
-            IntentFilter f = new IntentFilter(act);
-            BroadcastReceiver r = new BroadcastReceiver() {
-                @Override public void onReceive(Context c, Intent i) {
-                    android.os.Bundle in = android.app.RemoteInput.getResultsFromIntent(i);
-                    CharSequence text = in == null ? null : in.getCharSequence("text");
-                    Diag.log("test " + (text != null ? "reply: " + text : "action: " + i.getStringExtra("which")));
-                    ((android.app.NotificationManager) c.getSystemService(NOTIFICATION_SERVICE)).cancel(77);
-                }
-            };
-            if (Build.VERSION.SDK_INT >= 33) getApplicationContext().registerReceiver(r, f, Context.RECEIVER_NOT_EXPORTED);
-            else getApplicationContext().registerReceiver(r, f);
-        }
-        android.app.PendingIntent reply = android.app.PendingIntent.getBroadcast(this, 1,
-                new Intent(act).setPackage(getPackageName()).putExtra("which", "reply"),
-                android.app.PendingIntent.FLAG_MUTABLE | android.app.PendingIntent.FLAG_UPDATE_CURRENT);
-        android.app.PendingIntent read = android.app.PendingIntent.getBroadcast(this, 2,
-                new Intent(act).setPackage(getPackageName()).putExtra("which", "mark read"),
-                android.app.PendingIntent.FLAG_IMMUTABLE | android.app.PendingIntent.FLAG_UPDATE_CURRENT);
-        android.app.Notification n = new android.app.Notification.Builder(this, NotifService.TEST_CHANNEL)
-                .setSmallIcon(android.R.drawable.sym_action_chat)
-                .setContentTitle("Test message")
-                .setContentText("Reply from the panel to test it")
-                .addAction(new android.app.Notification.Action.Builder(null, "Reply", reply)
-                        .addRemoteInput(new android.app.RemoteInput.Builder("text").setLabel("Reply").build())
-                        .setSemanticAction(android.app.Notification.Action.SEMANTIC_ACTION_REPLY).build())
-                .addAction(new android.app.Notification.Action.Builder(null, "Mark as read", read)
-                        .setSemanticAction(android.app.Notification.Action.SEMANTIC_ACTION_MARK_AS_READ).build())
-                .build();
-        nm.notify(77, n);
-    }
-
-    private static boolean testReceiverOn;
-
     @Override public void onConfigurationChanged(android.content.res.Configuration c) {
         super.onConfigurationChanged(c);
         // light/dark switched: rebuild with the new palette (icons come from the cache instantly)
-        // (compare with what this activity was built in: the panel service may flip the shared palette first)
+        // (compare with what this activity was built in: the shared palette may have flipped first)
         Ui.theme(this);
         // font size, display size or language changed too: everything is sized in onCreate
         android.content.res.Configuration was = builtConfig;
@@ -297,6 +243,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
     @Override protected void onNewIntent(Intent i) {
         super.onNewIntent(i);
+        if (HomeGuard.ACTION_SET_HOME.equals(i.getAction())) { HomeGuard.request(this, 77); return; }
         if (!Intent.ACTION_MAIN.equals(i.getAction())) return;
         // Home pressed: unwind everything back to the plain home screen.
         closeAllOverlays();
@@ -382,9 +329,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         if (builtDark != Ui.dark || builtAccent != Ui.ACCENT) { recreate(); return; }
         settleHome();
         NotifService.listener = notifChanged;
-        // put the panel's service back if a phone cleaner force-stopped us (Android turns it off)
-        final Context appCtx = getApplicationContext();
-        wallWorker.execute(() -> Diag.repair(appCtx));
+        HomeGuard.check(this); // not the home app any more? leave a note that switches back
         // notification access granted but not connected (Honor may drop listeners): ask again
         if (NotifService.running == null) {
             String l = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
@@ -1156,14 +1101,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
     /** StatusBarManager.expandNotificationsPanel is hidden API, but launchers have used it for years. */
     @SuppressWarnings("JavaReflectionMemberAccess")
-    private void expandNotifications(boolean notifications) {
-        if (PanelService.openSide(notifications)) return;
-        expandNotifications();
-    }
-
     private void expandNotifications() {
-        // our own notifications page when the panel service is on, otherwise the system shade
-        if (PanelService.openNotifications()) return;
         try {
             Object sb = getSystemService("statusbar");
             Class.forName("android.app.StatusBarManager").getMethod("expandNotificationsPanel").invoke(sb);
@@ -1557,9 +1495,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         float progress; // 0 closed .. 1 open
         private float downX, downY, startProgress;
         private boolean dragging, homeLayered, barsDark = true, shadeFired;
-        /** This gesture is driving our panel (pulled down on home): where the pull began. */
-        private boolean pullingPanel;
-        private float pullFrom;
+
         private VelocityTracker vt;
         private ValueAnimator anim;
         private final int slop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
@@ -1742,17 +1678,11 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             if (placing != null) return false;
             float dy = ev.getY() - downY, dx = ev.getX() - downX;
             if (progress == 0f && dy > slop * 2 && Math.abs(dy) > Math.abs(dx) * 1.3f) {
-                // home screen, pulling down: hand off to the notification shade, once per gesture
+                // home screen, pulling down: hand off to the system's notification shade, once per gesture
                 if (!shadeFired) {
                     shadeFired = true;
                     removeCallbacks(homeLongPress);
-                    // starting near the top: the same left/right rule as the status bar; lower: notifications
-                    boolean top = downY < insetTop + dpi(160);
-                    boolean notifs = !(top && downX > getWidth() * 0.45f);
-                    // our panel follows the thumb, down and back up, until it lets go
-                    pullingPanel = PanelService.beginPull(notifs);
-                    pullFrom = ev.getY();
-                    if (!pullingPanel) expandNotifications(notifs); // the system shade instead
+                    expandNotifications();
                 }
                 return true;
             }
@@ -1771,27 +1701,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 }
             }
             return false;
-        }
-
-        private long lastTapUp;
-        private float lastTapX, lastTapY;
-
-        /** Two quick taps on empty home space lock the phone. */
-        private void checkDoubleTap(MotionEvent ev) {
-            ViewConfiguration vc = ViewConfiguration.get(getContext());
-            boolean tap = ev.getEventTime() - ev.getDownTime() < ViewConfiguration.getTapTimeout() * 3
-                    && Math.hypot(ev.getX() - downX, ev.getY() - downY) < slop;
-            if (!tap || placing != null) { lastTapUp = 0; return; }
-            long now = ev.getEventTime();
-            if (now - lastTapUp < ViewConfiguration.getDoubleTapTimeout() + 60
-                    && Math.hypot(ev.getX() - lastTapX, ev.getY() - lastTapY) < vc.getScaledDoubleTapSlop()) {
-                lastTapUp = 0;
-                if (!PanelService.lockScreen()) snack("To lock with a double-tap, turn on Fast Launcher controls in Accessibility");
-                return;
-            }
-            lastTapUp = now;
-            lastTapX = ev.getX();
-            lastTapY = ev.getY();
         }
 
         private float distanceFor(float dy) {
@@ -1815,7 +1724,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                     if (!dragging && (Math.abs(ev.getY() - downY) > slop || Math.abs(ev.getX() - downX) > slop))
                         removeCallbacks(homeLongPress);
                     if (!dragging) maybeStartDrag(ev);
-                    if (pullingPanel) { PanelService.pullTo(ev.getY() - pullFrom); return true; }
                     if (dragging) {
                         float p = startProgress + distanceFor(downY - ev.getY());
                         setProgress(p);
@@ -1825,15 +1733,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
                     removeCallbacks(homeLongPress);
-                    if (pullingPanel) { // let go of a pull: the panel settles open or closed
-                        pullingPanel = false;
-                        vt.computeCurrentVelocity(1000);
-                        PanelService.endPull(ev.getActionMasked() == MotionEvent.ACTION_UP ? vt.getYVelocity() : 0f);
-                        vt.recycle();
-                        vt = null;
-                        return true;
-                    }
-                    if (!dragging && progress == 0f && ev.getActionMasked() == MotionEvent.ACTION_UP) checkDoubleTap(ev);
+                    
                     if (dragging) {
                         vt.computeCurrentVelocity(1000);
                         float vy = vt.getYVelocity();

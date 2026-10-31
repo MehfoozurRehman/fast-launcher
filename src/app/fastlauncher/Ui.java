@@ -27,9 +27,8 @@ import android.widget.TextView;
 final class Ui {
     private Ui() {}
 
-    // Palette for every surface the launcher draws over its own background (panels, menus,
-    // sheets). It matches the system's own pop-ups, sampled from the phone's Wi-Fi panel, and
-    // follows light/dark mode. Anything drawn straight on the wallpaper stays white.
+    // Palette for every surface the launcher draws over its own background (menus,
+    // sheets). It matches the system's own pop-ups and follows light/dark mode. Anything drawn straight on the wallpaper stays white.
     static boolean dark = true;
     static int FG, FG2, FG3, CARD, GROUP, FILL, ICON_BG, LINE, PRESS, HANDLE, SCRIM, BG,
             TRACK, STRONG, ON_STRONG, INK, ACCENT, DANGER, DANGER_BG;
@@ -368,7 +367,7 @@ final class Ui {
         };
     }
 
-    /** A flat tile (panel buttons, groups): a plain rounded fill, no gradients. */
+    /** A flat tile (groups, rows): a plain rounded fill, no gradients. */
     static android.graphics.drawable.Drawable glass(int color, final float radius) {
         final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
         fill.setColor(color);
@@ -385,30 +384,8 @@ final class Ui {
             @Override public void getOutline(android.graphics.Outline o) { o.setRoundRect(getBounds(), radius); }
             @Override public void setAlpha(int a) { fill.setAlpha(a); }
             @Override public void setColorFilter(android.graphics.ColorFilter cf) {}
-            // setTint(color) changes the fill in place (used to cross-fade a switch's colours)
-            @Override public void setTintList(android.content.res.ColorStateList t) {
-                if (t != null) { fill.setColor(t.getDefaultColor()); invalidateSelf(); }
-            }
             @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
         };
-    }
-
-    private static final android.animation.ArgbEvaluator ARGB = new android.animation.ArgbEvaluator();
-
-    static int mix(int a, int b, float f) { return (Integer) ARGB.evaluate(f, a, b); }
-
-    /**
-     * Cross-fade a switch from off to on (or back): f goes 0..1 over a short, eased moment and
-     * paint(f) draws each step. Returns the animator so a newer change can cancel it.
-     */
-    static ValueAnimator crossfade(ValueAnimator running, java.util.function.Consumer<Float> paint) {
-        if (running != null) running.cancel();
-        ValueAnimator a = ValueAnimator.ofFloat(0f, 1f);
-        a.setDuration(220);
-        a.setInterpolator(STANDARD);
-        a.addUpdateListener(an -> paint.accept((Float) an.getAnimatedValue()));
-        a.start();
-        return a;
     }
 
     static GradientDrawable round(int color, float radius) {
@@ -741,63 +718,6 @@ final class Ui {
             return true;
         }
     }
-
-    // ------------------------------------------------------------------ switch
-
-    static final class Toggle extends View {
-        private boolean on;
-        private float pos;
-        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private OnPick listener;
-
-        Toggle(Context c, boolean on) {
-            super(c);
-            this.on = on;
-            this.pos = on ? 1 : 0;
-            setClickable(true);
-            setOnClickListener(v -> {
-                this.on = !this.on;
-                ValueAnimator a = ValueAnimator.ofFloat(pos, this.on ? 1 : 0);
-                a.setDuration(220);
-                a.setInterpolator(EMPHASIZED);
-                a.addUpdateListener(an -> { pos = (Float) an.getAnimatedValue(); invalidate(); });
-                a.start();
-                performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK);
-                if (listener != null) listener.onPick(this.on ? 1 : 0);
-            });
-        }
-
-        void setListener(OnPick l) { listener = l; }
-
-        boolean isOn() { return on; }
-
-        /** Show a state from outside (no listener call); slides there when animate is true. */
-        void setOn(boolean v, boolean animate) {
-            if (v == on && pos == (v ? 1 : 0)) return;
-            on = v;
-            if (!animate) { pos = v ? 1 : 0; invalidate(); return; }
-            ValueAnimator a = ValueAnimator.ofFloat(pos, v ? 1 : 0);
-            a.setDuration(220);
-            a.setInterpolator(EMPHASIZED);
-            a.addUpdateListener(an -> { pos = (Float) an.getAnimatedValue(); invalidate(); });
-            a.start();
-        }
-
-        @Override protected void onMeasure(int ws, int hs) {
-            setMeasuredDimension(dpi(getContext(), 52), dpi(getContext(), 32));
-        }
-
-        @Override protected void onDraw(Canvas c) {
-            float w = getWidth(), h = getHeight(), r = h / 2f, in = dp(getContext(), 3);
-            p.setColor(blend(TRACK, ACCENT, pos));
-            c.drawRoundRect(0, 0, w, h, r, r, p);
-            float cx = r + (w - 2 * r) * pos;
-            p.setColor(Color.WHITE);
-            c.drawCircle(cx, r, r - in, p);
-        }
-    }
-
-    // ------------------------------------------------------------------ rounded image
 
     /** Shows a bitmap centre-cropped into a rounded rect, over a placeholder colour. */
     static final class RoundImage extends View {

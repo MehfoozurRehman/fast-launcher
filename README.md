@@ -21,51 +21,13 @@ Made for a Honor X8b (Snapdragon 680, 90 Hz) that felt janky with heavier launch
   (in the dock: Info and Remove). Apps without shortcuts get just the button row. Hidden apps
   stay out of the drawer but still come up in search; type “hidden” to list them.
   Single-colour shortcut icons (Facebook's, for example) are tinted so they show on the dark card.
-- **Swipe down on home** opens the notifications page; **double-tap** empty space to lock the phone.
+- **Swipe down on home** opens the phone's own notification shade.
 - **Under the date**: the next alarm and calendar event when they fall within the coming day.
-- **Notifications, from any app**: swipe down from the left side of the status bar. Tap one to open it,
-  swipe it right to dismiss, swipe it left for Snooze (an hour) and the app's notification Settings,
-  or Clear all. Several from one app share a card ("3 more from WhatsApp",
-  tap to expand, Clear for the lot); **History** (a small link by the title) brings back the last day's dismissed ones. Swipe sideways to move between notifications and controls;
-  a swipe from the screen edge (the back gesture) closes the panel. With the panel open, pulling down
-  from the top again switches sides: the other page drops in from above, following your finger.
-  Ongoing ones (USB mode, charging, downloads with their progress) are listed first and can be tapped
-  but not dismissed. Notification buttons work (Reply opens a reply field in the card, Mark as read
-  and the like act without closing the panel). **Original** in the panel's top bar opens the
-  phone's own notifications or control centre (whichever page you're on), just that once. An incoming call closes the panel; in landscape the phone's own pull-down is used.
-- **Control panel, from any app**: swipe down from the right half of the status bar (needs the
-  "Fast Launcher controls" accessibility service, which reads no screen content). Wi-Fi, Mobile data,
-  Bluetooth and Torch tiles; a now-playing card (album art, live progress you can drag to seek, controls, a button to choose where the
-  sound plays; tap it to open the player) beside tall brightness and volume sliders that show the real level; and a
-  grid with Hotspot, Auto-rotate, Aeroplane, Location, Dark mode, Do not disturb, Sound mode, Eye
-  comfort, Battery saver, Screenshot, Screen record, Cast, Calculator, Recorder, Lock and Power.
-  Everything switches in place: what Android lets apps change directly, and the rest (Wi-Fi, mobile
-  data, Bluetooth, hotspot, aeroplane mode, location, dark mode, eye comfort, power saving) by pressing
-  the phone's own Control Centre switch out of sight, behind the panel. Nothing opens Settings; "Original" shows the phone's own panel.
-  Wi-Fi and Bluetooth: tap the tile to switch, long-press it for our own page of networks or
-  devices with an On/Off switch; tap one to join or connect (a new network's password box opens when
-  one is needed). If the phone ignores a press (it does while a radio is still settling), it's pressed again.
-  Our own pages (long-press the tile, or hold a round button and let go; hold and drag still moves it):
-  Mobile data (carrier, 4G/5G and signal, each SIM, data used today and this month), Hotspot (on/off,
-  what it shares, data shared today), Location (where you are now, which apps can use it), Sound
-  (ring / vibrate / silent and a slider for every volume; also on long-press of the volume slider),
-  Do not disturb (priority / alarms only / total silence, for 1 hour, 2 hours or until morning),
-  Battery (level, charging and time to full, health, temperature, power saving) and Torch
-  (brightness levels on phones that have them). Each has a link to the full settings at the bottom.
-  One-time setup over adb for the numbers: `pm grant app.fastlauncher android.permission.READ_PHONE_STATE`,
-  `appops set app.fastlauncher GET_USAGE_STATS allow` and `appops set app.fastlauncher SCHEDULE_EXACT_ALARM allow`.
-  Screen record uses the phone's own recorder (no consent pop-up, with sound).
-  Long-press the brightness slider to switch auto-brightness on or off.
-  Long-press any round button and drag it to rearrange the grid; the order is remembered.
-  The pull strip is removed while the phone is locked.
-- **Look**: like the system's control centre, the panel shows whatever was on screen, blurred, behind
-  see-through tiles (the capture stays in memory and is never saved). Menus, the wallpaper sheet
-  and messages are frosted glass over the blurred wallpaper. Everything follows light and dark mode.
+- **Look**: menus, the wallpaper sheet and messages are solid cards over the blurred wallpaper. Everything follows light and dark mode.
 - **Type**: clock, date and headings use Montserrat (bundled, SIL Open Font License, see `assets/fonts/OFL.txt`).
 - **Long-press home**: wallpaper panel, the launcher's only settings: your wallpaper large with New one
-  and Browse on it, a row of fresh picks to preview and set (kept until you tap Refresh), themes, auto-change, and the lock screen: its wallpaper Off / Same /
-  Dimmed / Blurred, and (with the adb grant) whether notifications and their contents show there.
-  The lock screen itself stays the system's; nothing replaces or covers it.
+  and Browse on it, a row of fresh picks to preview and set (kept until you tap Refresh), themes and auto-change.
+  The lock screen and the notification and quick-settings panels are the phone's own; the launcher does not touch them.
 - **Colours** follow the wallpaper: the accent is a soft tone of its most colourful colour (grey keeps blue).
   - Wallpapers come from [wallhaven.cc](https://wallhaven.cc) (SFW, portrait, at least 1080x1920).
   - **New one** swaps the wallpaper and remembers the old one as disliked, so it never comes back.
@@ -88,10 +50,6 @@ otherwise Android requires an uninstall (which loses the dock, hidden apps and n
 One-time grants over adb (they survive restarts and updates). Run each once after a fresh install:
 
 ```bash
-adb shell pm grant app.fastlauncher android.permission.WRITE_SECURE_SETTINGS
-```
-
-```bash
 adb shell pm grant app.fastlauncher android.permission.POST_NOTIFICATIONS
 ```
 
@@ -103,12 +61,11 @@ adb shell appops set app.fastlauncher MANAGE_EXTERNAL_STORAGE allow
 adb shell dumpsys deviceidle whitelist +app.fastlauncher
 ```
 
-In order: switching the panel service back on if Android turns it off (a force-stop, for example by a
-phone cleaner, does that); the screen recorder's Stop notification; reading the current wallpaper so a
-photo set from the gallery still gets the blur (Android 13+ allows that only with all-files access);
-and keeping battery saving from putting the launcher to sleep. The other permissions (calendar,
-contacts, nearby devices, notification access, accessibility, modify system settings) are the usual
-Android prompts; the report's checklist shows any that are missing.
+In order: the one reminder the launcher leaves if it ever stops being the home app; reading the current
+wallpaper so a photo set from the gallery still gets the blur (Android 13+ allows that only with all-files
+access); and keeping battery saving from putting the launcher to sleep. The other permissions (calendar,
+contacts, location for the weather, notification access) are the usual Android prompts; the report's
+checklist shows any that are missing.
 
 ## If something goes wrong
 - **Report a problem** is at the bottom of the wallpaper sheet (long-press the home screen). It shares a
@@ -125,4 +82,5 @@ adb shell am broadcast -a app.fastlauncher.DEBUG --es debug report -p app.fastla
 adb shell cat /sdcard/Android/data/app.fastlauncher/files/report.txt
 ```
 
-- If Honor's launcher ever takes over as home: Settings > Apps > Default apps > Home app > Fast Launcher.
+- If Honor's launcher ever takes over as home, the launcher leaves a notification, "Fast Launcher isn't your
+  home screen". Tap it and answer the system's question. (Or: Settings > Apps > Default apps > Home app.)

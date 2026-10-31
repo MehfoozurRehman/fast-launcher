@@ -4,35 +4,18 @@
 
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
-    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
-    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <!-- precise location: Android only lists nearby Wi-Fi networks to apps that have it -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
-    <!-- the screen recorder's "Stop" notification (Android 13+ asks for this) -->
+    <!-- the one reminder if Fast Launcher ever stops being the home app (Android 13+ asks for this) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <!-- granted once over adb (pm grant): lets the launcher switch its panel service back on
-         after a phone cleaner force-stops it -->
-    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
     <!-- granted once over adb (appops): since Android 13 it's the only way an app may read the
          current wallpaper, so a photo set from the gallery still gets the frosted blur -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.SET_WALLPAPER" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <!-- the Mobile data page: carrier, network type and each SIM (granted over adb) -->
-    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
-    <!-- data used today / this month and shared by the hotspot (usage access, granted over adb) -->
-    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
-    <!-- Do not disturb "for 1 hour" ends on time (granted over adb) -->
-    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <queries>
         <intent>
@@ -76,31 +59,5 @@
             android:name=".WallJob"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
-        <service
-            android:name=".PanelService"
-            android:exported="true"
-            android:label="Fast Launcher controls"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/panel_service" />
-        </service>
-        <activity
-            android:name=".Recorder$Consent"
-            android:exported="false"
-            android:excludeFromRecents="true"
-            android:taskAffinity=""
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
-        <!-- switches Do not disturb off when its timer (1 hour, 2 hours, morning) runs out -->
-        <receiver
-            android:name=".ControlPanel$DndEnd"
-            android:exported="false" />
-        <service
-            android:name=".Recorder$Service_"
-            android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
     </application>
 </manifest>
