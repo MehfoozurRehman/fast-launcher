@@ -33,8 +33,9 @@ import java.util.Set;
 final class Icons {
 
     /** Bump when the look changes so cached PNGs are re-rendered. */
-    private static final int VERSION = 11;
-    private static final float SHAPE = 0.78f; // the blob's size relative to the icon cell
+    private static final int VERSION = 13;
+    private static final float LOGO = 0.80f; // the logo on top of an icon's background, so it has room around it
+    private static final float SHAPE = 0.82f; // the blob's size relative to the icon cell
 
     private Icons() {}
 
@@ -233,7 +234,19 @@ final class Icons {
             Rect r = new Rect(-ext, -ext, s + ext, s + ext);
             Drawable bg = a.getBackground(), fg = a.getForeground();
             if (bg != null) { bg.setBounds(r); bg.draw(c); } else c.drawColor(Color.WHITE);
-            if (fg != null) { fg.setBounds(r); fg.draw(c); }
+            if (fg != null) {
+                // the background is the container (it fills the shape); the logo sits inside it with space around
+                fg.setBounds(r);
+                c.save();
+                c.scale(LOGO, LOGO, s / 2f, s / 2f);
+                // a logo that bleeds off its layer on purpose (Facebook's "f" runs off the bottom) is
+                // trimmed by a circle, so it ends inside the shape with a margin instead of at its edge
+                Path keep = new Path();
+                keep.addCircle(s / 2f, s / 2f, s * 0.5f, Path.Direction.CW);
+                c.clipPath(keep);
+                fg.draw(c);
+                c.restore();
+            }
             return b;
         }
         // Legacy icon: if it already fills its square, let it bleed to the edge.
