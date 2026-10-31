@@ -1565,7 +1565,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             if (blurView.hasBlur() && blurView.getVisibility() != View.VISIBLE) blurView.setVisibility(View.VISIBLE);
             // Smart Launcher's sequence (measured frame by frame on this phone), driven by the
             // thumb: the further the pull, the further along.
-            //  first half: home shrinks back a little and fades, the dock lifting as it goes,
+            //  first half: home (clock, dock) simply fades out where it is, no movement at all,
             //   while the wallpaper darkens in place (still sharp)
             //  second half: the apps fade in where they belong, rising the last few dp into
             //   place over the drawer's deep background; closing runs it backwards
@@ -1581,15 +1581,15 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 btnSearch.setAlpha(1f);
             }
 
-            float ha = 1f - span(progress, 0.05f, 0.42f);
+            float f = span(progress, 0f, 0.42f);
+            float ha = 1f - f * f * (3f - 2f * f); // smoothstep: gentle at both ends
             home.setAlpha(ha);
             int hv = ha <= 0f ? View.INVISIBLE : View.VISIBLE;
             if (home.getVisibility() != hv) home.setVisibility(hv);
-            float sc = 1f - 0.08f * act1;
-            home.setScaleX(sc);
-            home.setScaleY(sc);
+            home.setScaleX(1f);
+            home.setScaleY(1f);
             home.setTranslationY(0f);
-            dock.setTranslationY(-28 * dp * act1);
+            dock.setTranslationY(0f);
         }
 
         /** 0 before `from`, 1 after `to`, straight in between. */
