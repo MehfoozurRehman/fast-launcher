@@ -175,6 +175,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
                 else if ("dim".equals(w[1])) { dimView.setVisibility(v); }
                 return;
             }
+            if (what != null && what.startsWith("cells:")) { AppGridView.debugNoCells = what.endsWith(":0"); grid.invalidate(); return; }
             if ("fps:start".equals(what)) { FrameMeter.start(MainActivity.this); return; }
             if ("fps:stop".equals(what)) { Diag.log(FrameMeter.stop()); return; }
             if ("export".equals(what)) {

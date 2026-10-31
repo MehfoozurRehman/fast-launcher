@@ -31,6 +31,7 @@ final class AppGridView extends View {
         ComponentName cn;
         ActivityInfo ai;
         volatile Bitmap icon;
+        volatile Bitmap cell, cellFor;
         boolean blank;
     }
 
@@ -196,6 +197,46 @@ final class AppGridView extends View {
         return s.substring(0, Math.max(1, n)).trim() + "…";
     }
 
+    static boolean debugNoCells;
+    private boolean needCells, buildingCells;
+    private static final java.util.concurrent.ExecutorService cellWorker = java.util.concurrent.Executors.newSingleThreadExecutor();
+
+    private void buildCells() {
+        if (!labels || buildingCells || getWidth() <= 0) return;
+        buildingCells = true;
+        final List<AppEntry> snapshot = new ArrayList<>(items);
+        final int w = Math.round(cellW());
+        final Paint tp = new Paint(textPaint);
+        final float gap = labelGap, size = iconSize;
+        cellWorker.execute(() -> {
+            try {
+                int made = 0;
+                for (AppEntry e : snapshot) {
+                    Bitmap ic = e.icon;
+                    if (ic == null || e.blank || e.drawLabel == null || (e.cell != null && e.cellFor == ic)) continue;
+                    Bitmap soft = ic.copy(Bitmap.Config.ARGB_8888, false);
+                    if (soft == null) continue;
+                    float pad = (ic.getWidth() - size) / 2f;
+                    float base = pad + size + gap + tp.getTextSize();
+                    int h = (int) Math.ceil(base + tp.descent() + 2);
+                    Bitmap cell = Bitmap.createBitmap(Math.max(w, ic.getWidth()), Math.max(h, ic.getHeight()), Bitmap.Config.ARGB_8888);
+                    Canvas c = new Canvas(cell);
+                    c.drawBitmap(soft, (cell.getWidth() - ic.getWidth()) / 2f, 0, null);
+                    c.drawText(e.drawLabel, cell.getWidth() / 2f, base, tp);
+                    soft.recycle();
+                    e.cell = Icons.toHardware(cell);
+                    e.cellFor = ic;
+                    if (++made % 24 == 0) postInvalidate();
+                }
+            } catch (Throwable t) {
+                Diag.log("cells: " + t);
+            } finally {
+                buildingCells = false;
+                postInvalidate();
+            }
+        });
+    }
+
     private float cellW() { return (getWidth() - 2 * padX) / cols; }
 
     float[] cellCenter(int i) {
@@ -215,7 +256,9 @@ final class AppGridView extends View {
     @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
         if (labels) {
             float maxW = (w - 2 * padX) / cols - 6;
-            for (AppEntry e : items) e.drawLabel = fit(e.label, maxW);
+            for (AppEntry e : items) { e.drawLabel = fit(e.label, maxW); e.cell = null; e.cellFor = null; }
+            needCells = true;
+            invalidate();
         }
     }
 
@@ -272,13 +315,21 @@ final class AppGridView extends View {
                             half * 0.62f, half * 0.62f, slotPaint);
                 }
                 Bitmap b = e.icon;
+                boolean cellDrawn = false;
                 if (b != null && !e.blank) {
                     float pad = (b.getWidth() - iconSize) / 2f;
-                    canvas.drawBitmap(b, cx - b.getWidth() / 2f, top - pad, iconPaint);
+                    Bitmap cell = e.cell;
+                    if (labels && !debugNoCells && cell != null && e.cellFor == b) {
+                        canvas.drawBitmap(cell, cx - cell.getWidth() / 2f, top - pad, iconPaint);
+                        cellDrawn = true;
+                    } else {
+                        canvas.drawBitmap(b, cx - b.getWidth() / 2f, top - pad, iconPaint);
+                        if (labels) needCells = true;
+                    }
                     Integer cnt = e.cn == null ? null : notifs.get(e.cn.getPackageName());
                     if (cnt != null && !slots && rowAlpha == 255) drawBadge(canvas, cx + iconSize * 0.36f, top + iconSize * 0.12f, cnt);
                 }
-                if (labels && e.drawLabel != null) {
+                if (labels && !cellDrawn && e.drawLabel != null) {
                     canvas.drawText(e.drawLabel, cx, top + iconSize + labelGap + textPaint.getTextSize(), textPaint);
                 }
                 if (save >= 0) canvas.restoreToCount(save);
@@ -292,6 +343,7 @@ final class AppGridView extends View {
                 canvas.drawText(footer, cx, y + footerH() / 2 + footerText.getTextSize() * 0.35f, footerText);
             }
         }
+        if (needCells) { needCells = false; buildCells(); }
         if (slots && slotAlpha < 1f) postInvalidateOnAnimation();
         if (bottomEdge != null && !bottomEdge.isFinished()) {
             int save = canvas.save();
