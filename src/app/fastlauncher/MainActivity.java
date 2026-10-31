@@ -396,11 +396,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         return t;
     }
 
-    /** A glass pill for the home screen: the blurred wallpaper through a dark tint (white text sits on it). */
-    static void pill(View v) {
-        v.setBackground(Ui.frost(v, Ui.dp(v.getContext(), 22), 0x73000000));
-    }
-
     static AppGridView makeDock(Context c) { return new AppGridView(c, 5, 17, 90, 48, 8, 0, false, false); }
 
     static String clockText(Calendar c) {
@@ -452,34 +447,31 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
         weatherChip = new LinearLayout(this);
         weatherChip.setGravity(Gravity.CENTER_VERTICAL);
-        weatherChip.setPadding(dpi(10), dpi(7), dpi(16), dpi(7));
+        weatherChip.setPadding(dpi(14), dpi(4), dpi(4), dpi(4));
         weatherGlyph = new Weather.Glyph(this);
-        weatherChip.addView(weatherGlyph, new LinearLayout.LayoutParams(dpi(24), dpi(24)));
-        weatherText = makeChipText(this, 15.5f, 650);
+        weatherChip.addView(weatherGlyph, new LinearLayout.LayoutParams(dpi(22), dpi(22)));
+        weatherText = makeDate(this); // same small tracked style as the date: one line
         LinearLayout.LayoutParams wt = new LinearLayout.LayoutParams(-2, -2);
-        wt.leftMargin = dpi(6);
+        wt.leftMargin = dpi(5);
         weatherChip.addView(weatherText, wt);
-        pill(weatherChip);
         weatherChip.setClickable(true);
         weatherChip.setOnClickListener(v -> onWeatherTap(v));
         Ui.pressable(weatherChip);
         weatherChip.setVisibility(View.GONE);
-        chipRow.addView(weatherChip);
+        dateRow.addView(weatherChip);
 
-        agenda = makeChipText(this, 14.5f, 600);
+        agenda = makeChipText(this, 15f, 600);
+        agenda.setTextColor(0xE6FFFFFF);
+        agenda.setShadowLayer(Ui.dp(this, 4), 0, Ui.dp(this, 1), 0x40000000);
         agenda.setSingleLine(true);
         agenda.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        agenda.setMaxWidth(dpi(230));
-        agenda.setPadding(dpi(16), dpi(9), dpi(16), dpi(9));
-        pill(agenda);
+        agenda.setMaxWidth(dpi(300));
         agenda.setVisibility(View.GONE);
         agenda.setOnClickListener(v -> startSafely(agendaHasEvent
                 ? Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALENDAR)
                 : new Intent(AlarmClock.ACTION_SHOW_ALARMS), v));
         Ui.pressable(agenda);
-        LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(-2, -2);
-        ap.leftMargin = dpi(8);
-        chipRow.addView(agenda, ap);
+        chipRow.addView(agenda, new LinearLayout.LayoutParams(-2, -2));
 
         dock = makeDock(this);
         dock.setListener(new AppGridView.Listener() {
@@ -580,7 +572,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         dpm.topMargin = dpi(DATE_TOP_DP);
         dateRow.setLayoutParams(dpm);
         FrameLayout.LayoutParams chm = (FrameLayout.LayoutParams) chipRow.getLayoutParams();
-        chm.topMargin = dpi(DATE_TOP_DP) + dpi(30);
+        chm.topMargin = dpi(DATE_TOP_DP) + dpi(32);
         chipRow.setLayoutParams(chm);
 
         FrameLayout.LayoutParams dk = (FrameLayout.LayoutParams) dock.getLayoutParams();
