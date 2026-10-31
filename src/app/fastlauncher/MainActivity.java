@@ -54,7 +54,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity implements WallpaperUi.Host {
-    static final int CLOCK_TOP_DP = 100, DATE_TOP_DP = 204, DOCK_HEIGHT_DP = 190;
+    static final int CLOCK_TOP_DP = 128, DATE_TOP_DP = 104, CHIP_TOP_DP = 236, DOCK_HEIGHT_DP = 190;
     private static final int DOCK_SLOTS = 10;
     private static final String[][] DEFAULT_DOCK = {
             {"com.google.android.apps.maps"}, {"com.wispr.flowapp"}, {"com.facebook.katana"},
@@ -366,21 +366,21 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     static TextView makeClock(Context c) {
         TextView t = new TextView(c);
         t.setTextColor(Color.WHITE);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 96);
-        t.setTypeface(Ui.font(c, 700));
-        t.setLetterSpacing(-0.04f);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 100);
+        t.setTypeface(Ui.font(c, 520));
+        t.setLetterSpacing(-0.05f);
         t.setIncludeFontPadding(false);
         t.setGravity(Gravity.CENTER);
-        t.setShadowLayer(Ui.dp(c, 8), 0, Ui.dp(c, 2), 0x47000000);
+        t.setShadowLayer(Ui.dp(c, 10), 0, Ui.dp(c, 2), 0x40000000);
         return t;
     }
 
     static TextView makeDate(Context c) {
         TextView t = new TextView(c);
         t.setTextColor(0xF2FFFFFF);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13.5f);
-        t.setTypeface(Ui.font(c, 650));
-        t.setLetterSpacing(0.14f);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16.5f);
+        t.setTypeface(Ui.font(c, 600));
+        t.setLetterSpacing(0.01f);
         t.setIncludeFontPadding(false);
         t.setGravity(Gravity.CENTER);
         t.setShadowLayer(Ui.dp(c, 4), 0, Ui.dp(c, 1), 0x40000000);
@@ -406,10 +406,18 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
     }
 
     static String dateText(Calendar c) {
-        return new SimpleDateFormat("EEEE  ·  d MMMM", Locale.getDefault()).format(c.getTime()).toUpperCase(Locale.getDefault());
+        return new SimpleDateFormat("EEEE, d MMMM", Locale.getDefault()).format(c.getTime());
     }
 
     private int dpi(float v) { return Math.round(v * dp); }
+
+    static void pill(View v, int l, int t, int r, int b) {
+        android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+        g.setColor(0x4D000000);
+        g.setCornerRadius(Ui.dp(v.getContext(), 20));
+        v.setBackground(g);
+        v.setPadding(Ui.dpi(v.getContext(), l), Ui.dpi(v.getContext(), t), Ui.dpi(v.getContext(), r), Ui.dpi(v.getContext(), b));
+    }
 
     private void buildHome() {
         coverView = new BlurView(this);
@@ -445,22 +453,25 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
 
         weatherChip = new LinearLayout(this);
         weatherChip.setGravity(Gravity.CENTER_VERTICAL);
-        weatherChip.setPadding(dpi(14), dpi(4), dpi(4), dpi(4));
+        pill(weatherChip, 10, 7, 14, 7);
         weatherGlyph = new Weather.Glyph(this);
-        weatherChip.addView(weatherGlyph, new LinearLayout.LayoutParams(dpi(22), dpi(22)));
+        weatherChip.addView(weatherGlyph, new LinearLayout.LayoutParams(dpi(20), dpi(20)));
         weatherText = makeDate(this);
+        weatherText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15f);
         LinearLayout.LayoutParams wt = new LinearLayout.LayoutParams(-2, -2);
-        wt.leftMargin = dpi(5);
+        wt.leftMargin = dpi(6);
         weatherChip.addView(weatherText, wt);
         weatherChip.setClickable(true);
         weatherChip.setOnClickListener(v -> onWeatherTap(v));
         Ui.pressable(weatherChip);
         weatherChip.setVisibility(View.GONE);
-        dateRow.addView(weatherChip);
+        LinearLayout.LayoutParams wc = new LinearLayout.LayoutParams(-2, -2);
+        wc.rightMargin = dpi(8);
+        chipRow.addView(weatherChip, wc);
 
         agenda = makeChipText(this, 15f, 600);
+        pill(agenda, 14, 7, 14, 7);
         agenda.setTextColor(0xE6FFFFFF);
-        agenda.setShadowLayer(Ui.dp(this, 4), 0, Ui.dp(this, 1), 0x40000000);
         agenda.setSingleLine(true);
         agenda.setEllipsize(android.text.TextUtils.TruncateAt.END);
         agenda.setMaxWidth(dpi(300));
@@ -567,7 +578,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         dpm.topMargin = dpi(DATE_TOP_DP);
         dateRow.setLayoutParams(dpm);
         FrameLayout.LayoutParams chm = (FrameLayout.LayoutParams) chipRow.getLayoutParams();
-        chm.topMargin = dpi(DATE_TOP_DP) + dpi(32);
+        chm.topMargin = dpi(CHIP_TOP_DP);
         chipRow.setLayoutParams(chm);
 
         FrameLayout.LayoutParams dk = (FrameLayout.LayoutParams) dock.getLayoutParams();
