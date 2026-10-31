@@ -516,7 +516,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         drawer = new FrameLayout(this) {
             @Override public boolean hasOverlappingRendering() { return false; }
         };
-        blurView.setForeground(new android.graphics.drawable.ColorDrawable(0xB3000000)); // deep, like Smart Launcher's
+        blurView.setForeground(new android.graphics.drawable.ColorDrawable(0x33000000)); // a light extra dim: the blur already darkens itself for legible text
         drawer.setVisibility(View.INVISIBLE);
         root.addView(drawer, new FrameLayout.LayoutParams(-1, -1));
 
@@ -1560,7 +1560,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             drawer.setAlpha(act2);
             blurView.setAlpha(span(progress, 0.35f, 0.62f));
             if (dimView.getVisibility() != View.VISIBLE) dimView.setVisibility(View.VISIBLE);
-            dimView.setAlpha(0.5f * act1);
+            dimView.setAlpha(0.3f * act1);
             if (!searching) {
                 title.setAlpha(1f);
                 btnSearch.setAlpha(1f);
