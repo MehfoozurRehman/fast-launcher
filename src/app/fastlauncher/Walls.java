@@ -421,6 +421,7 @@ final class Walls {
         Bitmap b = BitmapFactory.decodeFile(blurFile(c).getPath(), o);
         if (b == null) return null;
         float top = readable(b);
+        b.setHasAlpha(false);
         return new Blur(Icons.toHardware(b), top);
     }
 

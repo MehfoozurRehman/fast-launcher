@@ -506,7 +506,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         drawer = new FrameLayout(this) {
             @Override public boolean hasOverlappingRendering() { return false; }
         };
-        blurView.setForeground(new android.graphics.drawable.ColorDrawable(0x33000000));
         drawer.setVisibility(View.INVISIBLE);
         root.addView(drawer, new FrameLayout.LayoutParams(-1, -1));
 
@@ -717,7 +716,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
         boolean blur = blurView.hasBlur();
         if (blur) {
             drawer.setBackground(null);
-            blurView.setDim(1f);
+            blurView.setDim(0.8f);
         } else {
             drawer.setBackgroundColor(brightWall ? 0x8C000000 : 0x59000000);
         }
@@ -1447,6 +1446,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             if (homeLayered) return;
             homeLayered = true;
             home.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            drawer.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         }
 
         private void endLayers() {
@@ -1454,6 +1454,7 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             if (dragging && hasWindowFocus()) return;
             homeLayered = false;
             home.setLayerType(View.LAYER_TYPE_NONE, null);
+            drawer.setLayerType(View.LAYER_TYPE_NONE, null);
         }
 
         void setProgress(float p) {
@@ -1485,7 +1486,8 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             layDrawer();
             drawer.setAlpha(act2);
             blurView.setAlpha(span(progress, 0.35f, 0.62f));
-            if (dimView.getVisibility() != View.VISIBLE) dimView.setVisibility(View.VISIBLE);
+            int dv = progress < 0.62f ? View.VISIBLE : View.INVISIBLE;
+            if (dimView.getVisibility() != dv) dimView.setVisibility(dv);
             dimView.setAlpha(0.3f * act1);
             if (!searching) {
                 title.setAlpha(1f);
