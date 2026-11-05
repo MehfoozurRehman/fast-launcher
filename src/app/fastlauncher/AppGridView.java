@@ -407,7 +407,6 @@ final class AppGridView extends View {
         vt.addMovement(ev);
         switch (ev.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                requestUnbufferedDispatch(android.view.InputDevice.SOURCE_TOUCHSCREEN);
                 flinging = false;
                 downX = ev.getX(); downY = lastY = ev.getY();
                 dragging = false; longFired = false;

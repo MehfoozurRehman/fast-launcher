@@ -1660,26 +1660,17 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             if (target == 0f && searching) endSearch();
             float dist = Math.abs(target - progress);
             if (dist < 0.002f) { setProgress(target); return; }
-            final float x0 = progress - target;
-            final float v0 = velocity > 0f ? Math.signum(target - progress) * velocity / (travel() * 0.45f) : 0f;
-            final float w = 17f, b = v0 + w * x0;
-            float settle = 0.7f;
-            for (float t = 0.05f; t < 0.7f; t += 0.01f) {
-                float e = (float) Math.exp(-w * t);
-                if (Math.abs((x0 + b * t) * e) < 0.002f && Math.abs((b - w * (x0 + b * t)) * e) < 0.03f) { settle = t; break; }
+            long dur = Math.round(130 + 170 * dist);
+            android.animation.TimeInterpolator curve = Ui.EMPHASIZED;
+            if (velocity > 200f) {
+                float px = dist * travel() * 0.45f;
+                dur = Math.max(120, Math.min(420, Math.round(2f * px / velocity * 1000f)));
+                curve = new android.view.animation.DecelerateInterpolator(1f);
             }
-            final float span = settle;
-            anim = ValueAnimator.ofFloat(0f, 1f);
-            anim.setDuration(Math.round(span * 1000f));
-            anim.setInterpolator(new android.view.animation.LinearInterpolator());
-            anim.addUpdateListener(a -> {
-                float f = a.getAnimatedFraction();
-                if (f >= 1f) { setProgress(target); setOver(0f); return; }
-                float t = f * span;
-                float p = target + (x0 + b * t) * (float) Math.exp(-w * t);
-                setProgress(p);
-                if (p > 1f) setOver(Math.min(dpi(36), (p - 1f) * travel() * 0.45f));
-            });
+            anim = ValueAnimator.ofFloat(progress, target);
+            anim.setDuration(dur);
+            anim.setInterpolator(curve);
+            anim.addUpdateListener(a -> setProgress((Float) a.getAnimatedValue()));
             anim.start();
         }
 
@@ -1704,7 +1695,6 @@ public class MainActivity extends Activity implements WallpaperUi.Host {
             if (!overlays.isEmpty()) return false;
             switch (ev.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
-                    requestUnbufferedDispatch(android.view.InputDevice.SOURCE_TOUCHSCREEN);
                     downX = ev.getX(); downY = ev.getY();
                     dragging = false;
                     shadeFired = false;
