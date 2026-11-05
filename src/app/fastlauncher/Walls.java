@@ -332,7 +332,7 @@ final class Walls {
             try { shown.await(700, java.util.concurrent.TimeUnit.MILLISECONDS); } catch (InterruptedException ignored) {}
         }
         try {
-            wm.setBitmap(b, null, true, WallpaperManager.FLAG_SYSTEM);
+            wm.setBitmap(b, null, true, WallpaperManager.FLAG_SYSTEM | WallpaperManager.FLAG_LOCK);
         } finally {
             if (cv != null) cv.settle();
         }
