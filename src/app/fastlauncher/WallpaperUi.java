@@ -333,14 +333,24 @@ final class WallpaperUi {
             }
         }
 
-        private void loadPicks() {
+        private static final long PICKS_TTL = 6 * 3600_000L;
+
+        private void loadPicks() { loadPicks(true); }
+
+        private void loadPicks(boolean refreshIfStale) {
             if (!pickWalls.isEmpty() || picksLoading) return;
+            android.content.SharedPreferences sp = Walls.prefs(getContext());
             try {
-                org.json.JSONArray a = new org.json.JSONArray(Walls.prefs(getContext()).getString("picks", "[]"));
+                org.json.JSONArray a = new org.json.JSONArray(sp.getString("picks", "[]"));
                 for (int i = 0; i < a.length() && i < PICKS; i++) pickWalls.add(Walls.Wall.fromJson(a.getJSONObject(i)));
             } catch (Exception ignored) {}
-            if (!pickWalls.isEmpty()) { showPicks(); return; }
-            fetchPicks();
+            if (pickWalls.isEmpty()) { fetchPicks(); return; }
+            Walls.Wall cur = Walls.current(getContext());
+            boolean stale = System.currentTimeMillis() - sp.getLong("picksAt", 0) > PICKS_TTL;
+            boolean used = false;
+            if (cur != null) for (Walls.Wall w : pickWalls) if (w.id.equals(cur.id)) used = true;
+            if (refreshIfStale && (stale || used)) { fetchPicks(); return; }
+            showPicks();
         }
 
         private void fetchPicks() {
@@ -370,13 +380,14 @@ final class WallpaperUi {
                 host.runOnUi(() -> {
                     picksLoading = false;
                     setLoading(false);
-                    if (result.isEmpty()) { host.snack("Couldn't load new picks"); loadPicks(); return; }
+                    if (result.isEmpty()) { host.snack("Couldn't load new picks"); loadPicks(false); return; }
                     pickWalls.clear();
                     pickWalls.addAll(result);
                     try {
                         org.json.JSONArray a = new org.json.JSONArray();
                         for (Walls.Wall w : result) a.put(w.toJson());
-                        Walls.prefs(getContext()).edit().putString("picks", a.toString()).apply();
+                        Walls.prefs(getContext()).edit().putString("picks", a.toString())
+                                .putLong("picksAt", System.currentTimeMillis()).apply();
                     } catch (Exception ignored) {}
                     showPicks();
                 });
