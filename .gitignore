@@ -2,5 +2,6 @@ build/
 *.keystore
 *.apk
 .gitignore
-config.bat
 node_modules
+
+.env
